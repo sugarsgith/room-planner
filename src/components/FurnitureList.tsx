@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { analyzeLayout } from "../domain/geometry";
+import { analyzeLayout, issueIsActive } from "../domain/geometry";
 import { activeFurniture } from "../domain/schema";
 import { formatCm } from "../domain/units";
 import { useEditor } from "../state/store";
@@ -24,7 +24,7 @@ export function FurnitureList() {
       <ul className="furniture-list">
         {furniture.map((item) => {
           const issue = issues.get(item.id);
-          const warn = Boolean(issue && (issue.outOfRoom || issue.exceedsCeiling || issue.overlapIds.length > 0));
+          const warn = Boolean(issue && issueIsActive(issue));
           const size =
             item.shape === "cylinder"
               ? `直径 ${formatCm(item.width)} × 高 ${formatCm(item.height)}`

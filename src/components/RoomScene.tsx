@@ -2,7 +2,8 @@ import { OrbitControls } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { analyzeLayout, wallSegments } from "../domain/geometry";
+import { beamFootprints, obstacleFootprint, storageSectors } from "../domain/fixtures";
+import { analyzeLayout, issueIsActive, wallSegments } from "../domain/geometry";
 import { activeFurniture } from "../domain/schema";
 import { roundM } from "../domain/units";
 import type { Furniture, Room } from "../domain/types";
@@ -40,6 +41,7 @@ function Scene() {
       <hemisphereLight args={["#f7f1e6", "#c9bfb0", 0.45]} />
       <Floor room={room} />
       <FloorGrid width={room.width} depth={room.depth} />
+      <FixtureMeshes />
       {wallsVisible &&
         walls.map((wall, index) => (
           <mesh
@@ -65,9 +67,7 @@ function Scene() {
           selected={item.id === selectedId}
           warned={Boolean(
             issues.get(item.id) &&
-              ((issues.get(item.id)?.overlapIds.length ?? 0) > 0 ||
-                issues.get(item.id)?.outOfRoom ||
-                issues.get(item.id)?.exceedsCeiling),
+              (issues.get(item.id) ? issueIsActive(issues.get(item.id)!) : false),
           )}
         />
       ))}
@@ -92,6 +92,80 @@ function Floor({ room }: { room: Room }) {
     <mesh rotation={[-Math.PI / 2, 0, 0]} position={[room.width / 2, 0, room.depth / 2]} userData={{ floor: true }}>
       <planeGeometry args={[room.width, room.depth]} />
       <meshStandardMaterial color="#e7e0d4" side={THREE.DoubleSide} />
+    </mesh>
+  );
+}
+
+function FixtureMeshes() {
+  const room = useEditor((s) => s.project.room);
+  return (
+    <>
+      {room.fixtures.map((fixture) => {
+        if (fixture.type === "beam") {
+          return beamFootprints(fixture, room).map((box, index) => (
+            <mesh
+              key={`${fixture.id}-${index}`}
+              position={[
+                (box.minX + box.maxX) / 2,
+                room.ceilingHeight - fixture.drop / 2,
+                (box.minZ + box.maxZ) / 2,
+              ]}
+              raycast={() => undefined}
+            >
+              <boxGeometry args={[box.maxX - box.minX, fixture.drop, box.maxZ - box.minZ]} />
+              <meshStandardMaterial color="#8d8680" transparent opacity={0.9} />
+            </mesh>
+          ));
+        }
+        const box = obstacleFootprint(fixture, room);
+        if (!box) return null;
+        const height = fixture.type === "pillar" ? room.ceilingHeight : fixture.height;
+        return (
+          <group key={fixture.id}>
+            <mesh
+              position={[(box.minX + box.maxX) / 2, height / 2, (box.minZ + box.maxZ) / 2]}
+              raycast={() => undefined}
+            >
+              <boxGeometry args={[Math.max(0.001, box.maxX - box.minX), height, Math.max(0.001, box.maxZ - box.minZ)]} />
+              <meshStandardMaterial color={fixture.type === "pillar" ? "#9a938a" : "#c2b8aa"} />
+            </mesh>
+            {fixture.type === "storage" &&
+              storageSectors(fixture, room).map((sector, index) => (
+                <SwingMesh key={`${fixture.id}-swing-${index}`} sector={sector} />
+              ))}
+          </group>
+        );
+      })}
+    </>
+  );
+}
+
+function SwingMesh({ sector }: { sector: { hinge: { x: number; z: number }; closed: { x: number; z: number }; into: { x: number; z: number }; radius: number } }) {
+  const geometry = useMemo(() => {
+    const steps = 18;
+    const vertices: number[] = [];
+    const hinge = sector.hinge;
+    for (let i = 0; i < steps; i++) {
+      const t0 = (i / steps) * (Math.PI / 2);
+      const t1 = ((i + 1) / steps) * (Math.PI / 2);
+      const p = (t: number) => [
+        hinge.x + sector.radius * (Math.cos(t) * sector.closed.x + Math.sin(t) * sector.into.x),
+        0.015,
+        hinge.z + sector.radius * (Math.cos(t) * sector.closed.z + Math.sin(t) * sector.into.z),
+      ];
+      const a = p(t0);
+      const b = p(t1);
+      vertices.push(hinge.x, 0.015, hinge.z, a[0], a[1], a[2], b[0], b[1], b[2]);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+    geo.computeVertexNormals();
+    return geo;
+  }, [sector.hinge.x, sector.hinge.z, sector.closed.x, sector.closed.z, sector.into.x, sector.into.z, sector.radius]);
+  useEffect(() => () => geometry.dispose(), [geometry]);
+  return (
+    <mesh geometry={geometry} raycast={() => undefined}>
+      <meshBasicMaterial color="#c4a574" transparent opacity={0.28} side={THREE.DoubleSide} depthWrite={false} />
     </mesh>
   );
 }

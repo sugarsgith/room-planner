@@ -1,10 +1,12 @@
 /**
- * Project file schema v1.
- * Internal lengths are meters. The UI converts to centimeters.
+ * Project file schema v2.
+ * Internal lengths are meters. Furniture dimensions in the UI are centimeters.
+ * Fixture sizes and furniture elevation in the UI are millimeters.
+ * Version 1 files migrate on load (fixtures default to [], elevation to 0).
  * See AGENTS.md for the coordinate system and rotation convention.
  */
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export interface Vec2 {
   /** Meters, room X (width axis). */
@@ -45,7 +47,69 @@ export interface Room {
    */
   outline: Vec2[];
   openings: Opening[];
+  /**
+   * Solid additions inside the rectangular room. They do not change `outline`.
+   * Empty for a bare rectangle.
+   */
+  fixtures: RoomFixture[];
 }
+
+/** 2D plan corners. 左上 is back-left (x=0, z=depth) because +Z is up the plan. */
+export type PlanCorner = "back-left" | "back-right" | "front-left" | "front-right";
+
+/**
+ * Walls as seen on the plan: 上 back, 右 right, 下 front, 左 left.
+ * A wall anchor's offset starts at the outline's counterclockwise start:
+ * 下 left end, 右 front end, 上 right end, 左 back end.
+ */
+export type PlanWall = "back" | "right" | "front" | "left";
+
+export type FixtureAnchor =
+  | { kind: "corner"; corner: PlanCorner }
+  | { kind: "wall"; wall: PlanWall; /** Meters from the wall start. */ offset: number };
+
+export type StorageDoor = "none" | "single" | "double" | "sliding";
+export type HingeSide = "left" | "right";
+
+interface FixtureBase {
+  id: string;
+}
+
+/** Floor-to-ceiling box. spanX is 横 (along X), spanZ is 縦 (along Z). */
+export interface PillarFixture extends FixtureBase {
+  type: "pillar";
+  anchor: FixtureAnchor;
+  spanX: number;
+  spanZ: number;
+}
+
+/**
+ * Built-in cabinet. On a wall, `width` runs along the wall and `depth` sticks into the room.
+ * In a corner, `width` is along X and `depth` is along Z. The door face is `width` long.
+ */
+export interface StorageFixture extends FixtureBase {
+  type: "storage";
+  anchor: FixtureAnchor;
+  width: number;
+  depth: number;
+  /** Meters. Must stay below the ceiling. */
+  height: number;
+  door: StorageDoor;
+  /** Used when door is "single". Ignored otherwise. */
+  hinge: HingeSide;
+}
+
+/** Ceiling beam along one or more walls. */
+export interface BeamFixture extends FixtureBase {
+  type: "beam";
+  walls: PlanWall[];
+  /** How far the beam sticks into the room, meters. */
+  protrusion: number;
+  /** How far the beam hangs down from the ceiling, meters. */
+  drop: number;
+}
+
+export type RoomFixture = PillarFixture | StorageFixture | BeamFixture;
 
 /** Box uses width x depth. Cylinder uses width as the diameter; depth must equal width. */
 export type FurnitureShape = "box" | "cylinder";
@@ -70,6 +134,11 @@ export interface Furniture {
   rotation: number;
   /** #rrggbb */
   color: string;
+  /**
+   * Meters from the floor to the bottom of the item. Omitted means 0,
+   * so the item sits on the floor. Set this to place something on storage.
+   */
+  elevation?: number;
 }
 
 /** One arrangement of furniture in the room. Comparison UI is not built yet. */

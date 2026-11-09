@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
-import { analyzeLayout, footprintCorners, rotateLocal } from "../domain/geometry";
+import { arcPoints, beamFootprints, obstacleFootprint, storageSectors } from "../domain/fixtures";
+import { analyzeLayout, footprintCorners, issueIsActive, rotateLocal } from "../domain/geometry";
 import { activeFurniture } from "../domain/schema";
 import { formatCm, normalizeDegrees } from "../domain/units";
 import { useEditor } from "../state/store";
@@ -283,10 +284,53 @@ export function PlanView() {
             <line key={`xj-${x}`} x1={x} y1={0} x2={x} y2={-room.depth} className="grid major" strokeWidth={1.7 / ppm} />
           ))}
           <path d={outline} className="room-fill" />
+          <defs>
+            <pattern id="fixture-hatch" width="0.08" height="0.08" patternUnits="userSpaceOnUse">
+              <path d="M-0.02 0.02 L0.02 -0.02 M0 0.08 L0.08 0" stroke="#6d675e" strokeWidth={1 / ppm} />
+            </pattern>
+          </defs>
+          {room.fixtures.map((fixture) => {
+            if (fixture.type === "beam") {
+              return beamFootprints(fixture, room).map((box, index) => (
+                <rect
+                  key={`${fixture.id}-${index}`}
+                  data-fixture-type="beam"
+                  className="fixture fixture-beam"
+                  x={box.minX}
+                  y={-box.maxZ}
+                  width={box.maxX - box.minX}
+                  height={box.maxZ - box.minZ}
+                  strokeWidth={1.4 / ppm}
+                  strokeDasharray={`${7 / ppm} ${5 / ppm}`}
+                />
+              ));
+            }
+            const box = obstacleFootprint(fixture, room);
+            if (!box) return null;
+            return (
+              <g key={fixture.id} data-fixture-type={fixture.type} data-testid={`fixture-${fixture.type}`}>
+                <rect
+                  className="fixture fixture-solid"
+                  x={box.minX}
+                  y={-box.maxZ}
+                  width={box.maxX - box.minX}
+                  height={box.maxZ - box.minZ}
+                  strokeWidth={1.4 / ppm}
+                />
+                <rect
+                  className="fixture fixture-hatch"
+                  x={box.minX}
+                  y={-box.maxZ}
+                  width={box.maxX - box.minX}
+                  height={box.maxZ - box.minZ}
+                />
+              </g>
+            );
+          })}
           <path d={outline} className="room-edge" strokeWidth={2 / ppm} />
           {furniture.map((item) => {
             const issue = issueById.get(item.id);
-            const warn = Boolean(issue && (issue.overlapIds.length > 0 || issue.outOfRoom || issue.exceedsCeiling));
+            const warn = Boolean(issue && issueIsActive(issue));
             const selected = item.id === selectedId;
             const className = warn ? "furniture warn" : selected ? "furniture selected" : "furniture";
             const strokeWidth = (warn || selected ? 2.6 : 1.4) / ppm;
@@ -314,6 +358,22 @@ export function PlanView() {
                 )}
               </g>
             );
+          })}
+          {room.fixtures.map((fixture) => {
+            if (fixture.type !== "storage") return null;
+            return storageSectors(fixture, room).map((sector, index) => {
+              const points = arcPoints(sector);
+              const line = points.map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"}${point.x} ${-point.z}`).join(" ");
+              return (
+                <path
+                  key={`${fixture.id}-swing-${index}`}
+                  data-testid="door-swing"
+                  className="swing"
+                  d={`${line} L${sector.hinge.x} ${-sector.hinge.z} Z`}
+                  strokeWidth={1.4 / ppm}
+                />
+              );
+            });
           })}
           {furniture
             .filter((item) => item.id === selectedId)

@@ -4,7 +4,7 @@ import { Inspector } from "./components/Inspector";
 import { PlanView } from "./components/PlanView";
 import { RoomScene } from "./components/RoomScene";
 import { Toolbar } from "./components/Toolbar";
-import { analyzeLayout } from "./domain/geometry";
+import { analyzeLayout, issueIsActive } from "./domain/geometry";
 import { activeFurniture } from "./domain/schema";
 import { cmToM, formatCm } from "./domain/units";
 import { downloadText } from "./lib/download";
@@ -22,7 +22,7 @@ export function App() {
 
   const furniture = activeFurniture(project);
   const issues = useMemo(() => analyzeLayout(project.room, furniture), [project.room, furniture]);
-  const problemCount = issues.filter((issue) => issue.outOfRoom || issue.exceedsCeiling || issue.overlapIds.length > 0).length;
+  const problemCount = issues.filter((issue) => issueIsActive(issue)).length;
   const selected = furniture.find((item) => item.id === selectedId);
 
   return (

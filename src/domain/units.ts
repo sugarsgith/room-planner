@@ -23,6 +23,20 @@ export function formatCm(meters: number, digits = 1): string {
   return mToCm(meters).toFixed(digits);
 }
 
+/** Round millimeters to the nearest 1 mm and convert to meters. */
+export function mmToM(mm: number): number {
+  return Math.round(mm) / 1000;
+}
+
+/** Convert meters to millimeters rounded to 1 mm. */
+export function mToMm(meters: number): number {
+  return Math.round(meters * 1000);
+}
+
+export function formatMm(meters: number): string {
+  return String(mToMm(meters));
+}
+
 export function normalizeDegrees(degrees: number): number {
   if (!Number.isFinite(degrees)) return 0;
   const wrapped = ((degrees % 360) + 360) % 360;

@@ -1,8 +1,8 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { activeFurniture } from "../domain/schema";
 import { BACKUP_KEY, STORAGE_KEY, type KeyValueStorage } from "../domain/storage";
 import { cmToM, mToCm } from "../domain/units";
-import { initEditor, useEditor } from "./store";
+import { initEditor, saveStatusLabel, useEditor } from "./store";
 
 function memory(initial: Record<string, string> = {}) {
   const map = new Map(Object.entries(initial));
@@ -86,7 +86,7 @@ describe("editor store", () => {
     initEditor(storage);
     const before = map.get(STORAGE_KEY);
     const name = useEditor.getState().project.room.name;
-    const result = useEditor.getState().importJson("{\"schemaVersion\":2}");
+    const result = useEditor.getState().importJson("{\"schemaVersion\":99}");
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain("schemaVersion");
     expect(useEditor.getState().project.room.name).toBe(name);
@@ -118,5 +118,55 @@ describe("editor store", () => {
     expect(saved).not.toBe(raw);
     expect(saved && JSON.parse(saved).layouts[0].furniture.find((item: { id: string }) => item.id === "bed").x).toBe(cmToM(10));
     expect(map.get(BACKUP_KEY)).toBe(raw);
+  });
+
+  it("debounces autosave, then records the local time, and a manual save flushes", () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(2026, 10, 9, 8, 23, 0));
+    try {
+      const { storage, writes } = memory();
+      initEditor(storage, { autosaveDelayMs: 400 });
+      const baseline = writes.filter((key) => key === STORAGE_KEY).length;
+      useEditor.getState().rotateBy("bed", 90);
+      expect(useEditor.getState().saveStatus).toBe("pending");
+      expect(saveStatusLabel("pending", null)).toBe("未保存の変更あり");
+      expect(writes.filter((key) => key === STORAGE_KEY).length).toBe(baseline);
+      vi.advanceTimersByTime(400);
+      expect(useEditor.getState().saveStatus).toBe("saved");
+      expect(saveStatusLabel("saved", useEditor.getState().savedAt)).toBe("保存済み 8:23");
+      expect(writes.filter((key) => key === STORAGE_KEY).length).toBe(baseline + 1);
+
+      useEditor.getState().rotateBy("bed", 90);
+      expect(useEditor.getState().saveStatus).toBe("pending");
+      useEditor.getState().saveNow();
+      expect(useEditor.getState().saveStatus).toBe("saved");
+      expect(writes.filter((key) => key === STORAGE_KEY).length).toBe(baseline + 2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a clear failure and does not write again after localStorage rejects the save", () => {
+    let fail = false;
+    const map = new Map<string, string>();
+    const storage: KeyValueStorage = {
+      getItem: (key) => (map.has(key) ? map.get(key)! : null),
+      setItem: (key, value) => {
+        if (fail && key === STORAGE_KEY) throw new Error("quota");
+        map.set(key, value);
+      },
+      removeItem: (key) => {
+        map.delete(key);
+      },
+    };
+    initEditor(storage);
+    const saved = map.get(STORAGE_KEY);
+    fail = true;
+    useEditor.getState().rotateBy("sofa", 90);
+    expect(useEditor.getState().saveStatus).toBe("error");
+    expect(saveStatusLabel("error", null)).toBe("保存できませんでした");
+    expect(map.get(STORAGE_KEY)).toBe(saved);
+    useEditor.getState().rotateBy("sofa", -90);
+    expect(map.get(STORAGE_KEY)).toBe(saved);
   });
 });

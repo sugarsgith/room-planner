@@ -4,7 +4,7 @@ import { App } from "./App";
 import { initEditor } from "./state/store";
 import "./styles.css";
 
-initEditor(window.localStorage);
+initEditor(window.localStorage, { autosaveDelayMs: 400 });
 
 const root = document.getElementById("root");
 if (!root) throw new Error("root missing");

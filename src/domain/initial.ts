@@ -22,6 +22,7 @@ export function createInitialProject(): Project {
       ceilingHeight: cmToM(240),
       outline: rectangleOutline(width, depth),
       openings: [],
+      fixtures: [],
     },
     layouts: [
       {

@@ -36,6 +36,7 @@ function room(width = 4, depth = 4, ceiling = 2.4): Room {
     ceilingHeight: ceiling,
     outline: rectangleOutline(width, depth),
     openings: [],
+    fixtures: [],
   };
 }
 

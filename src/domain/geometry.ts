@@ -1,4 +1,14 @@
-import type { Furniture, Room, Vec2 } from "./types";
+import {
+  beamFootprints,
+  furnitureBottom,
+  furnitureTop,
+  obstacleFootprint,
+  pointInSector,
+  storageSectors,
+  type Aabb,
+  type Sector,
+} from "./fixtures";
+import type { Furniture, Room, RoomFixture, Vec2 } from "./types";
 
 /**
  * Rotation is clockwise degrees when looking down from +Y.
@@ -169,7 +179,7 @@ export function isOutsideRoom(
 }
 
 export function exceedsCeiling(item: Furniture, ceilingHeight: number, eps = OVERLAP_EPSILON_M): boolean {
-  return item.height > ceilingHeight + eps;
+  return furnitureTop(item) > ceilingHeight + eps;
 }
 
 export interface ItemIssue {
@@ -177,23 +187,190 @@ export interface ItemIssue {
   outOfRoom: boolean;
   exceedsCeiling: boolean;
   overlapIds: string[];
+  fixtureOverlapIds: string[];
+  swingFixtureIds: string[];
+  beamFixtureIds: string[];
+}
+
+export function issueIsActive(issue: ItemIssue): boolean {
+  return (
+    issue.outOfRoom ||
+    issue.exceedsCeiling ||
+    issue.overlapIds.length > 0 ||
+    issue.fixtureOverlapIds.length > 0 ||
+    issue.swingFixtureIds.length > 0 ||
+    issue.beamFixtureIds.length > 0
+  );
+}
+
+function verticalOverlap(bottomA: number, topA: number, bottomB: number, topB: number, eps = OVERLAP_EPSILON_M): boolean {
+  return topA > bottomB + eps && topB > bottomA + eps;
 }
 
 export function analyzeLayout(room: Room, items: Furniture[]): ItemIssue[] {
+  const fixtures = room.fixtures ?? [];
   return items.map((item) => {
     const overlapIds: string[] = [];
     for (const other of items) {
       if (other.id === item.id) continue;
-      if (footprintsOverlap(item, other)) overlapIds.push(other.id);
+      const stacked = verticalOverlap(furnitureBottom(item), furnitureTop(item), furnitureBottom(other), furnitureTop(other));
+      if (stacked && footprintsOverlap(item, other)) overlapIds.push(other.id);
     }
     overlapIds.sort();
+    const fixtureOverlapIds: string[] = [];
+    const swingFixtureIds: string[] = [];
+    const beamFixtureIds: string[] = [];
+    for (const fixture of fixtures) {
+      if (fixture.type === "beam") {
+        if (hitsBeam(item, fixture, room)) beamFixtureIds.push(fixture.id);
+        continue;
+      }
+      const box = obstacleFootprint(fixture, room);
+      if (box && footprintHitsAabb(item, box)) {
+        const obstacleTop = fixture.type === "pillar" ? room.ceilingHeight : fixture.height;
+        if (verticalOverlap(furnitureBottom(item), furnitureTop(item), 0, obstacleTop)) {
+          fixtureOverlapIds.push(fixture.id);
+        }
+      }
+      if (fixture.type === "storage" && hitsSwing(item, fixture, room)) swingFixtureIds.push(fixture.id);
+    }
+    fixtureOverlapIds.sort();
+    swingFixtureIds.sort();
+    beamFixtureIds.sort();
     return {
       id: item.id,
       outOfRoom: isOutsideRoom(item, room),
       exceedsCeiling: exceedsCeiling(item, room.ceilingHeight),
       overlapIds,
+      fixtureOverlapIds,
+      swingFixtureIds,
+      beamFixtureIds,
     };
   });
+}
+
+function aabbItem(box: Aabb): Furniture {
+  return {
+    id: "aabb",
+    name: "aabb",
+    shape: "box",
+    width: Math.max(0, box.maxX - box.minX),
+    depth: Math.max(0, box.maxZ - box.minZ),
+    height: 1,
+    x: (box.minX + box.maxX) / 2,
+    z: (box.minZ + box.maxZ) / 2,
+    rotation: 0,
+    color: "#000000",
+  };
+}
+
+function footprintHitsAabb(item: Furniture, box: Aabb): boolean {
+  if (box.maxX - box.minX <= 0 || box.maxZ - box.minZ <= 0) return false;
+  return footprintsOverlap(item, aabbItem(box));
+}
+
+function hitsBeam(item: Furniture, fixture: RoomFixture & { type: "beam" }, room: Room): boolean {
+  const beamBottom = room.ceilingHeight - fixture.drop;
+  if (!verticalOverlap(furnitureBottom(item), furnitureTop(item), beamBottom, room.ceilingHeight)) return false;
+  return beamFootprints(fixture, room).some((box) => footprintHitsAabb(item, box));
+}
+
+function hitsSwing(item: Furniture, fixture: StorageFixtureLike, room: Room): boolean {
+  if (!verticalOverlap(furnitureBottom(item), furnitureTop(item), 0, fixture.height)) return false;
+  return storageSectors(fixture, room).some((sector) => footprintHitsSector(item, sector));
+}
+
+type StorageFixtureLike = Extract<RoomFixture, { type: "storage" }>;
+
+export function footprintHitsSector(item: Furniture, sector: Sector): boolean {
+  if (item.shape === "cylinder") return circleHitsSector(item.x, item.z, item.width / 2, sector);
+  const corners = footprintCorners(item);
+  if (corners.some((corner) => pointInSector(corner, sector))) return true;
+  const closed = {
+    x: sector.hinge.x + sector.closed.x * sector.radius,
+    z: sector.hinge.z + sector.closed.z * sector.radius,
+  };
+  const open = {
+    x: sector.hinge.x + sector.into.x * sector.radius,
+    z: sector.hinge.z + sector.into.z * sector.radius,
+  };
+  if ([sector.hinge, closed, open].some((point) => pointInBoxFootprint(point, item))) return true;
+  for (let i = 0; i < corners.length; i++) {
+    const a = corners[i];
+    const b = corners[(i + 1) % corners.length];
+    if (segmentsIntersect(a, b, sector.hinge, closed) || segmentsIntersect(a, b, sector.hinge, open)) return true;
+    if (segmentHitsArc(a, b, sector)) return true;
+  }
+  return false;
+}
+
+function circleHitsSector(cx: number, cz: number, radius: number, sector: Sector): boolean {
+  const vx = cx - sector.hinge.x;
+  const vz = cz - sector.hinge.z;
+  const along = vx * sector.closed.x + vz * sector.closed.z;
+  const inward = vx * sector.into.x + vz * sector.into.z;
+  let px = sector.hinge.x;
+  let pz = sector.hinge.z;
+  if (along >= 0 && inward >= 0) {
+    const dist = Math.hypot(along, inward);
+    if (dist <= sector.radius) return true;
+    const scale = sector.radius / dist;
+    px = sector.hinge.x + vx * scale;
+    pz = sector.hinge.z + vz * scale;
+  } else if (along >= inward) {
+    const clamped = Math.min(sector.radius, Math.max(0, along));
+    px = sector.hinge.x + sector.closed.x * clamped;
+    pz = sector.hinge.z + sector.closed.z * clamped;
+  } else {
+    const clamped = Math.min(sector.radius, Math.max(0, inward));
+    px = sector.hinge.x + sector.into.x * clamped;
+    pz = sector.hinge.z + sector.into.z * clamped;
+  }
+  return Math.hypot(cx - px, cz - pz) < radius - OVERLAP_EPSILON_M;
+}
+
+function pointInBoxFootprint(point: { x: number; z: number }, item: Furniture): boolean {
+  const local = worldToLocal(point.x - item.x, point.z - item.z, item.rotation);
+  const eps = OVERLAP_EPSILON_M;
+  return Math.abs(local.x) <= item.width / 2 + eps && Math.abs(local.z) <= item.depth / 2 + eps;
+}
+
+function segmentsIntersect(
+  a: { x: number; z: number },
+  b: { x: number; z: number },
+  c: { x: number; z: number },
+  d: { x: number; z: number },
+): boolean {
+  const d1 = cross(b.x - a.x, b.z - a.z, c.x - a.x, c.z - a.z);
+  const d2 = cross(b.x - a.x, b.z - a.z, d.x - a.x, d.z - a.z);
+  const d3 = cross(d.x - c.x, d.z - c.z, a.x - c.x, a.z - c.z);
+  const d4 = cross(d.x - c.x, d.z - c.z, b.x - c.x, b.z - c.z);
+  if (((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0))) return true;
+  return false;
+}
+
+function cross(ax: number, az: number, bx: number, bz: number): number {
+  return ax * bz - az * bx;
+}
+
+function segmentHitsArc(a: { x: number; z: number }, b: { x: number; z: number }, sector: Sector): boolean {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const fx = a.x - sector.hinge.x;
+  const fz = a.z - sector.hinge.z;
+  const qa = dx * dx + dz * dz;
+  const qb = 2 * (fx * dx + fz * dz);
+  const qc = fx * fx + fz * fz - sector.radius * sector.radius;
+  if (qa < 1e-12) return false;
+  const disc = qb * qb - 4 * qa * qc;
+  if (disc < 0) return false;
+  const root = Math.sqrt(disc);
+  for (const t of [(-qb - root) / (2 * qa), (-qb + root) / (2 * qa)]) {
+    if (t < -1e-6 || t > 1 + 1e-6) continue;
+    const point = { x: a.x + t * dx, z: a.z + t * dz };
+    if (pointInSector(point, sector)) return true;
+  }
+  return false;
 }
 
 export interface WallSegment {

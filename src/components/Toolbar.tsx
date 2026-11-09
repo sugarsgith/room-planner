@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { serializeProject } from "../domain/storage";
 import { downloadText } from "../lib/download";
-import { useEditor } from "../state/store";
+import { saveStatusLabel, useEditor } from "../state/store";
 
 export function Toolbar() {
   const viewMode = useEditor((s) => s.viewMode);
@@ -15,7 +15,11 @@ export function Toolbar() {
   const importError = useEditor((s) => s.importError);
   const dismissImportError = useEditor((s) => s.dismissImportError);
   const project = useEditor((s) => s.project);
+  const saveNow = useEditor((s) => s.saveNow);
+  const saveStatus = useEditor((s) => s.saveStatus);
+  const savedAt = useEditor((s) => s.savedAt);
   const fileRef = useRef<HTMLInputElement>(null);
+  const statusText = saveStatusLabel(saveStatus, savedAt);
 
   return (
     <header className="toolbar">
@@ -68,6 +72,14 @@ export function Toolbar() {
         </button>
       </div>
       <div className="toolbar-group">
+        <button type="button" data-testid="save-button" onClick={() => saveNow()}>
+          保存
+        </button>
+        {statusText && (
+          <span className={`save-status ${saveStatus}`} data-testid="save-status">
+            {statusText}
+          </span>
+        )}
         <button
           type="button"
           onClick={() => downloadText("room-planner.json", serializeProject(project), "application/json")}

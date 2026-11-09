@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { cmToM, formatCm } from "../domain/units";
+import { cmToM, formatCm, formatMm, mmToM } from "../domain/units";
 import { useEditor } from "../state/store";
 
 export function NumberField({
@@ -9,6 +9,7 @@ export function NumberField({
   maxM,
   onPreview,
   testId,
+  unit = "cm",
 }: {
   label: string;
   valueM: number;
@@ -16,22 +17,24 @@ export function NumberField({
   maxM: number;
   onPreview: (meters: number) => void;
   testId?: string;
+  unit?: "cm" | "mm";
 }) {
   const beginGesture = useEditor((s) => s.beginGesture);
   const endGesture = useEditor((s) => s.endGesture);
   const cancelGesture = useEditor((s) => s.cancelGesture);
-  const [text, setText] = useState(() => formatCm(valueM));
+  const shown = (meters: number) => (unit === "mm" ? formatMm(meters) : formatCm(meters));
+  const [text, setText] = useState(() => shown(valueM));
   const focused = useRef(false);
-  const origin = useRef(formatCm(valueM));
+  const origin = useRef(shown(valueM));
 
   useEffect(() => {
-    if (!focused.current) setText(formatCm(valueM));
-  }, [valueM]);
+    if (!focused.current) setText(shown(valueM));
+  }, [valueM, unit]);
 
   function parse(raw: string): number | null {
     const n = Number(raw);
     if (!Number.isFinite(n)) return null;
-    const meters = cmToM(Math.round(n * 10) / 10);
+    const meters = unit === "mm" ? mmToM(n) : cmToM(Math.round(n * 10) / 10);
     if (meters < minM - 1e-9 || meters > maxM + 1e-9) return null;
     return meters;
   }
@@ -45,7 +48,7 @@ export function NumberField({
         value={text}
         onFocus={() => {
           focused.current = true;
-          origin.current = formatCm(valueM);
+          origin.current = shown(valueM);
           beginGesture();
         }}
         onChange={(event) => {
@@ -54,9 +57,9 @@ export function NumberField({
           const meters = parse(next);
           if (meters !== null) onPreview(meters);
         }}
-        onBlur={() => {
+        onBlur={(event) => {
           focused.current = false;
-          const meters = parse(text);
+          const meters = parse(event.currentTarget.value);
           if (meters === null) {
             cancelGesture();
             setText(origin.current);
@@ -64,13 +67,13 @@ export function NumberField({
           }
           onPreview(meters);
           endGesture();
-          setText(formatCm(meters));
+          setText(shown(meters));
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
         }}
       />
-      <span className="unit">cm</span>
+      <span className="unit">{unit}</span>
     </label>
   );
 }
@@ -116,14 +119,15 @@ export function NameField({
           setText(next);
           if (valid(next)) onPreview(next);
         }}
-        onBlur={() => {
+        onBlur={(event) => {
           focused.current = false;
-          if (!valid(text)) {
+          const raw = event.currentTarget.value;
+          if (!valid(raw)) {
             cancelGesture();
             setText(origin.current);
             return;
           }
-          onPreview(text);
+          onPreview(raw);
           endGesture();
         }}
         onKeyDown={(event) => {

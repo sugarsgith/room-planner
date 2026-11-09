@@ -13,7 +13,7 @@
 
 ## 座標系
 
-内部単位はメートル。画面の数値はセンチメートルで、0.1 cm（1 mm）格子に丸める。`cmToM` / `mToCm` 以外で換算しない。
+内部単位はメートル。家具の画面はセンチメートル、出っ張りと底の高さはミリメートル。どちらも 1 mm 格子に丸める。`cmToM` / `mToCm` / `mmToM` / `mToMm` 以外で換算しない。
 
 - 原点は床の手前左。室内の X=0, Z=0, Y=0。
 - +X は幅方向（2D では右）。
@@ -30,13 +30,16 @@
 
 ## データ
 
-`schemaVersion` は 1。形は `src/domain/types.ts`。
+`schemaVersion` は 2。形は `src/domain/types.ts`。1 は `validateProject` が 2 に移行する。0 や 3 や文字列の版は拒否し、保存データは触らない。
 
-- `room.outline` … 上から見て反時計回りの XZ 多角形。外接矩形は `[0, width] × [0, depth]`。
+- `room.outline` … 上から見て反時計回りの XZ 多角形。外接矩形は `[0, width] × [0, depth]`。出っ張りを足しても outline は変えない。
+- `room.fixtures` … 柱・備え付け収納・梁。配置は `src/domain/fixtures.ts`。
 - `room.openings` … 窓・ドア。UI は未実装。読み込み時には検証する。
 - `layouts[]` と `activeLayoutId` … 配置。UI はアクティブな 1 件だけを編集し、残りは保存時に残す。
-- `furniture.shape` … `"box"` または `"cylinder"`。円柱は `width === depth`（直径）。
-- 未知の shape / opening type / schemaVersion は拒否する。未知の追加フィールドは通過させ、更新時はオブジェクトのスプレッドで残す。
+- `furniture.shape` … `"box"` または `"cylinder"`。円柱は `width === depth`（直径）。`elevation` は底の高さ（省略は 0）。
+- 未知の shape / opening type / fixture type / schemaVersion は拒否する。未知の追加フィールドは通過させ、更新時はオブジェクトのスプレッドで残す。
+
+自動保存は約 400 ms 待つ。待ちのあいだは「未保存の変更あり」。`保存` はすぐ書く。localStorage が失敗したら「保存できませんでした」で、壊れた既存データは上書きしない。
 
 検証と日本語のエラー文は `src/domain/schema.ts`。範囲外・0 以下・NaN・無限大は適用しない。
 

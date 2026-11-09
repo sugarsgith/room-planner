@@ -3,7 +3,8 @@ import { rectangleOutline } from "../domain/geometry";
 import { createInitialProject } from "../domain/initial";
 import { activeFurniture, LIMITS, parseProjectJson } from "../domain/schema";
 import { loadProject, saveProject, type KeyValueStorage, type LoadStatus } from "../domain/storage";
-import type { Furniture, FurnitureShape, Project, Room } from "../domain/types";
+import { fixtureError } from "../domain/fixtures";
+import type { Furniture, FurnitureShape, Project, Room, RoomFixture } from "../domain/types";
 import { normalizeDegrees, roundM } from "../domain/units";
 
 const HISTORY_LIMIT = 100;
@@ -56,15 +57,43 @@ export interface EditorState {
   importJson: (text: string) => { ok: true } | { ok: false; error: string };
   resumePersist: () => void;
   dismissImportError: () => void;
+  saveStatus: SaveStatus;
+  savedAt: number | null;
+  saveNow: () => void;
+  addFixture: (fixture: RoomFixture) => void;
+  replaceFixture: (fixture: RoomFixture, mode?: UpdateMode) => void;
+  removeFixture: (id: string) => void;
 }
 
+export type SaveStatus = "idle" | "pending" | "saved" | "error";
+
 export type FurniturePatch = Partial<
-  Pick<Furniture, "name" | "shape" | "width" | "depth" | "height" | "x" | "z" | "rotation" | "color">
+  Pick<Furniture, "name" | "shape" | "width" | "depth" | "height" | "x" | "z" | "rotation" | "color" | "elevation">
 >;
 
 export type RoomPatch = Partial<Pick<Room, "name" | "width" | "depth" | "ceilingHeight">>;
 
 let boundStorage: KeyValueStorage | null = null;
+let autosaveDelayMs = 0;
+let saveTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearSaveTimer(): void {
+  if (saveTimer !== null) {
+    clearTimeout(saveTimer);
+    saveTimer = null;
+  }
+}
+
+export function saveStatusLabel(status: SaveStatus, savedAt: number | null, now = new Date()): string {
+  if (status === "error") return "保存できませんでした";
+  if (status === "pending") return "未保存の変更あり";
+  if (status === "saved" && savedAt !== null) {
+    const when = new Date(savedAt);
+    const shown = Number.isNaN(when.getTime()) ? now : when;
+    return `保存済み ${shown.getHours()}:${String(shown.getMinutes()).padStart(2, "0")}`;
+  }
+  return "";
+}
 
 function snapshotOf(project: Project, selectedId: string | null): Snapshot {
   return { project: structuredClone(project), selectedId };
@@ -95,17 +124,39 @@ function sameDocument(a: Project, b: Project): boolean {
 }
 
 export const useEditor = create<EditorState>((set, get) => {
-  const persist = () => {
+  const persistNow = () => {
+    clearSaveTimer();
     const state = get();
-    if (!boundStorage || !state.persistAllowed || state.gestureBefore) return;
+    if (state.gestureBefore) return;
+    if (!boundStorage || !state.persistAllowed || state.loadStatus === "corrupt") {
+      if (state.loadStatus === "corrupt" || !state.persistAllowed) set({ saveStatus: "error" });
+      return;
+    }
     try {
       saveProject(boundStorage, state.project);
+      set({ saveStatus: "saved", savedAt: Date.now() });
     } catch {
       set({
         persistAllowed: false,
-        loadError: "ブラウザへの保存に失敗しました。自動保存を停止しました。書き出しはできます。",
+        saveStatus: "error",
+        loadError: "保存できませんでした",
       });
     }
+  };
+
+  const scheduleSave = () => {
+    const state = get();
+    if (!state.persistAllowed || state.loadStatus === "corrupt" || state.gestureBefore) return;
+    if (autosaveDelayMs <= 0) {
+      persistNow();
+      return;
+    }
+    set({ saveStatus: "pending" });
+    clearSaveTimer();
+    saveTimer = setTimeout(() => {
+      saveTimer = null;
+      persistNow();
+    }, autosaveDelayMs);
   };
 
   const commitProject = (project: Project, selectedId: string | null) => {
@@ -117,7 +168,7 @@ export const useEditor = create<EditorState>((set, get) => {
       past: trim([...current.past, snapshotOf(current.project, current.selectedId)]),
       future: [],
     });
-    persist();
+    scheduleSave();
   };
 
   return {
@@ -136,6 +187,8 @@ export const useEditor = create<EditorState>((set, get) => {
     loadError: null,
     corruptRaw: null,
     importError: null,
+    saveStatus: "idle",
+    savedAt: null,
 
     select: (id) => set({ selectedId: id }),
     setViewMode: (mode) => set({ viewMode: mode }),
@@ -161,7 +214,7 @@ export const useEditor = create<EditorState>((set, get) => {
         past: changed ? trim([...past, before]) : past,
         future: changed ? [] : future,
       });
-      if (changed) persist();
+      if (changed) scheduleSave();
     },
 
     cancelGesture: () => {
@@ -265,7 +318,7 @@ export const useEditor = create<EditorState>((set, get) => {
         project: previous.project,
         selectedId: previous.selectedId,
       });
-      persist();
+      scheduleSave();
     },
 
     redo: () => {
@@ -279,7 +332,7 @@ export const useEditor = create<EditorState>((set, get) => {
         project: next.project,
         selectedId: next.selectedId,
       });
-      persist();
+      scheduleSave();
     },
 
     importJson: (text) => {
@@ -297,13 +350,67 @@ export const useEditor = create<EditorState>((set, get) => {
         future: [],
         importError: null,
       });
-      persist();
+      persistNow();
       return { ok: true };
     },
 
     resumePersist: () => {
       set({ persistAllowed: true, loadStatus: "ok", loadError: null });
-      persist();
+      persistNow();
+    },
+
+    saveNow: () => {
+      if (get().loadStatus === "corrupt") {
+        set({ saveStatus: "error" });
+        return;
+      }
+      if (!get().persistAllowed) set({ persistAllowed: true });
+      persistNow();
+    },
+
+    addFixture: (fixture) => {
+      if (get().gestureBefore) get().endGesture();
+      const project = get().project;
+      if (fixtureError(fixture, project.room)) return;
+      if (project.room.fixtures.some((item) => item.id === fixture.id)) return;
+      commitProject(
+        { ...project, room: { ...project.room, fixtures: [...project.room.fixtures, fixture] } },
+        get().selectedId,
+      );
+    },
+
+    replaceFixture: (fixture, mode = "commit") => {
+      const resolved: UpdateMode = mode === "preview" && !get().gestureBefore ? "commit" : mode;
+      if (resolved === "commit" && get().gestureBefore) get().endGesture();
+      const project = get().project;
+      if (!project.room.fixtures.some((item) => item.id === fixture.id)) return;
+      if (fixtureError(fixture, project.room)) return;
+      const next: Project = {
+        ...project,
+        room: {
+          ...project.room,
+          fixtures: project.room.fixtures.map((item) => (item.id === fixture.id ? fixture : item)),
+        },
+      };
+      if (sameDocument(project, next)) return;
+      if (resolved === "preview") {
+        set({ project: next });
+        return;
+      }
+      commitProject(next, get().selectedId);
+    },
+
+    removeFixture: (id) => {
+      if (get().gestureBefore) get().endGesture();
+      const project = get().project;
+      if (!project.room.fixtures.some((item) => item.id === id)) return;
+      commitProject(
+        {
+          ...project,
+          room: { ...project.room, fixtures: project.room.fixtures.filter((item) => item.id !== id) },
+        },
+        get().selectedId,
+      );
     },
 
     dismissImportError: () => set({ importError: null }),
@@ -353,6 +460,7 @@ function applyFurniturePatch(item: Furniture, patch: FurniturePatch): Furniture 
   const rotation = patch.rotation !== undefined ? normalizeDegrees(patch.rotation) : item.rotation;
   const name = patch.name !== undefined ? patch.name : item.name;
   const color = patch.color !== undefined ? patch.color : item.color;
+  const elevation = patch.elevation !== undefined ? roundM(patch.elevation) : (item.elevation ?? 0);
   if (shape === "cylinder") {
     if (patch.width !== undefined) depth = width;
     else if (patch.depth !== undefined) width = depth;
@@ -364,7 +472,8 @@ function applyFurniturePatch(item: Furniture, patch: FurniturePatch): Furniture 
   if (!inRange(x, LIMITS.position) || !inRange(z, LIMITS.position)) return null;
   if (typeof name !== "string" || name.trim().length === 0 || name.length > LIMITS.name.max) return null;
   if (!/^#[0-9a-fA-F]{6}$/.test(color)) return null;
-  return { ...item, name, shape, width, depth, height, x, z, rotation, color };
+  if (!Number.isFinite(elevation) || elevation < 0 || elevation > 20) return null;
+  return { ...item, name, shape, width, depth, height, x, z, rotation, color, elevation };
 }
 
 function applyRoomPatch(room: Room, patch: RoomPatch): Room | null {
@@ -396,9 +505,12 @@ function createId(): string {
   return `id-${Date.now().toString(36)}-${Math.random().toString(16).slice(2)}`;
 }
 
-export function initEditor(storage: KeyValueStorage): void {
+export function initEditor(storage: KeyValueStorage, options?: { autosaveDelayMs?: number }): void {
+  clearSaveTimer();
   boundStorage = storage;
+  autosaveDelayMs = options?.autosaveDelayMs ?? 0;
   const loaded = loadProject(storage);
+  const now = Date.now();
   useEditor.setState({
     project: loaded.project,
     selectedId: null,
@@ -415,14 +527,18 @@ export function initEditor(storage: KeyValueStorage): void {
     loadError: loaded.error ?? null,
     corruptRaw: loaded.raw ?? null,
     importError: null,
+    saveStatus: loaded.status === "ok" ? "saved" : "idle",
+    savedAt: loaded.status === "ok" ? now : null,
   });
   if (loaded.status === "empty") {
     try {
       saveProject(storage, loaded.project);
+      useEditor.setState({ saveStatus: "saved", savedAt: Date.now() });
     } catch {
       useEditor.setState({
         persistAllowed: false,
-        loadError: "ブラウザへの保存に失敗しました。自動保存を停止しました。書き出しはできます。",
+        saveStatus: "error",
+        loadError: "保存できませんでした",
       });
     }
   }

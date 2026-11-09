@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { analyzeLayout } from "../domain/geometry";
+import { FixturesSection } from "./FixturesSection";
 import { activeFurniture, LIMITS } from "../domain/schema";
 import { normalizeDegrees } from "../domain/units";
 import { useEditor } from "../state/store";
@@ -81,6 +82,7 @@ export function Inspector() {
           />
           壁を半透明
         </label>
+        <FixturesSection />
       </section>
 
       <section>
@@ -149,6 +151,15 @@ export function Inspector() {
               testId="pos-z"
               onPreview={(z) => updateFurniture(selected.id, { z }, "preview")}
             />
+            <NumberField
+              label="底の高さ"
+              unit="mm"
+              valueM={selected.elevation ?? 0}
+              minM={0}
+              maxM={20}
+              testId="item-elevation"
+              onPreview={(elevation) => updateFurniture(selected.id, { elevation }, "preview")}
+            />
             <div className="rotation-row">
               <span>回転 {normalizeDegrees(selected.rotation).toFixed(0)}°</span>
               <button type="button" onClick={() => rotateBy(selected.id, -90)}>
@@ -177,6 +188,21 @@ export function Inspector() {
             {issue?.outOfRoom && (
               <p className="warn" data-testid="bounds-warning">
                 部屋の外にはみ出しています。
+              </p>
+            )}
+            {issue && issue.fixtureOverlapIds.length > 0 && (
+              <p className="warn" data-testid="fixture-overlap-warning">
+                部屋の出っ張りと重なっています。
+              </p>
+            )}
+            {issue && issue.swingFixtureIds.length > 0 && (
+              <p className="warn" data-testid="swing-warning">
+                扉の開閉スペースに家具があります。
+              </p>
+            )}
+            {issue && issue.beamFixtureIds.length > 0 && (
+              <p className="warn" data-testid="beam-warning">
+                天井の梁に接触しています。
               </p>
             )}
             {issue?.exceedsCeiling && (

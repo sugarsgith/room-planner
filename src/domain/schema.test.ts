@@ -27,10 +27,31 @@ describe("import validation", () => {
   });
 
   it("rejects the wrong schema version", () => {
-    for (const schemaVersion of [0, 2, "1", null]) {
+    for (const schemaVersion of [0, 3, "1", "2", null]) {
       const result = validateProject({ ...sample(), schemaVersion });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toContain("schemaVersion");
+    }
+  });
+
+  it("migrates a version 1 file and keeps the layout", () => {
+    const legacy = sample();
+    legacy.schemaVersion = 1;
+    delete (legacy.room as { fixtures?: unknown }).fixtures;
+    for (const item of legacy.layouts[0].furniture) delete item.elevation;
+    const result = validateProject(legacy);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.project.schemaVersion).toBe(2);
+      expect(result.project.room.fixtures).toEqual([]);
+      expect(result.project.layouts[0].furniture.map((item) => item.name)).toEqual([
+        "シングルベッド",
+        "デスク",
+        "2人掛けソファ",
+        "丸テーブル",
+      ]);
+      expect(result.project.layouts[0].furniture[0].elevation).toBe(0);
+      expect(result.project.layouts[0].furniture[0].x).toBe(legacy.layouts[0].furniture[0].x);
     }
   });
 
