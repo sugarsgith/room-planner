@@ -1,0 +1,204 @@
+import { useMemo } from "react";
+import { analyzeLayout } from "../domain/geometry";
+import { activeFurniture, LIMITS } from "../domain/schema";
+import { normalizeDegrees } from "../domain/units";
+import { useEditor } from "../state/store";
+import { NameField, NumberField } from "./fields";
+
+export function Inspector() {
+  const project = useEditor((s) => s.project);
+  const selectedId = useEditor((s) => s.selectedId);
+  const updateRoom = useEditor((s) => s.updateRoom);
+  const updateFurniture = useEditor((s) => s.updateFurniture);
+  const rotateBy = useEditor((s) => s.rotateBy);
+  const duplicate = useEditor((s) => s.duplicate);
+  const remove = useEditor((s) => s.remove);
+  const wallsVisible = useEditor((s) => s.wallsVisible);
+  const wallsTransparent = useEditor((s) => s.wallsTransparent);
+  const setWallsVisible = useEditor((s) => s.setWallsVisible);
+  const setWallsTransparent = useEditor((s) => s.setWallsTransparent);
+  const beginGesture = useEditor((s) => s.beginGesture);
+  const endGesture = useEditor((s) => s.endGesture);
+
+  const furniture = activeFurniture(project);
+  const selected = furniture.find((item) => item.id === selectedId) ?? null;
+  const issues = useMemo(() => analyzeLayout(project.room, furniture), [project.room, furniture]);
+  const issue = issues.find((entry) => entry.id === selected?.id);
+  const overlapNames =
+    issue?.overlapIds.map((id) => furniture.find((item) => item.id === id)?.name ?? id) ?? [];
+
+  return (
+    <aside className="panel inspector" data-testid="inspector">
+      <section>
+        <div className="panel-head">
+          <h2>部屋</h2>
+        </div>
+        <NameField
+          label="名前"
+          value={project.room.name}
+          testId="room-name"
+          onPreview={(name) => updateRoom({ name }, "preview")}
+        />
+        <NumberField
+          label="幅"
+          valueM={project.room.width}
+          minM={LIMITS.roomWidth.min}
+          maxM={LIMITS.roomWidth.max}
+          testId="room-width"
+          onPreview={(width) => updateRoom({ width }, "preview")}
+        />
+        <NumberField
+          label="奥行き"
+          valueM={project.room.depth}
+          minM={LIMITS.roomDepth.min}
+          maxM={LIMITS.roomDepth.max}
+          testId="room-depth"
+          onPreview={(depth) => updateRoom({ depth }, "preview")}
+        />
+        <NumberField
+          label="天井高"
+          valueM={project.room.ceilingHeight}
+          minM={LIMITS.ceiling.min}
+          maxM={LIMITS.ceiling.max}
+          testId="room-ceiling"
+          onPreview={(ceilingHeight) => updateRoom({ ceilingHeight }, "preview")}
+        />
+        <p className="hint">幅・奥行きを変えると床の外形は原点基準の長方形に置き換わります。</p>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={wallsVisible}
+            onChange={(event) => setWallsVisible(event.target.checked)}
+          />
+          3Dで壁を表示
+        </label>
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={wallsTransparent}
+            disabled={!wallsVisible}
+            onChange={(event) => setWallsTransparent(event.target.checked)}
+          />
+          壁を半透明
+        </label>
+      </section>
+
+      <section>
+        <div className="panel-head">
+          <h2>選択中の家具</h2>
+        </div>
+        {!selected && <p className="hint">一覧から家具を選ぶと、寸法と位置を cm で編集できます。</p>}
+        {selected && (
+          <>
+            <NameField
+              label="名前"
+              value={selected.name}
+              testId="item-name"
+              onPreview={(name) => updateFurniture(selected.id, { name }, "preview")}
+            />
+            {selected.shape === "cylinder" ? (
+              <NumberField
+                label="直径"
+                valueM={selected.width}
+                minM={LIMITS.furniture.min}
+                maxM={LIMITS.furniture.max}
+                testId="dim-width"
+                onPreview={(width) => updateFurniture(selected.id, { width }, "preview")}
+              />
+            ) : (
+              <>
+                <NumberField
+                  label="幅"
+                  valueM={selected.width}
+                  minM={LIMITS.furniture.min}
+                  maxM={LIMITS.furniture.max}
+                  testId="dim-width"
+                  onPreview={(width) => updateFurniture(selected.id, { width }, "preview")}
+                />
+                <NumberField
+                  label="奥行き"
+                  valueM={selected.depth}
+                  minM={LIMITS.furniture.min}
+                  maxM={LIMITS.furniture.max}
+                  testId="dim-depth"
+                  onPreview={(depth) => updateFurniture(selected.id, { depth }, "preview")}
+                />
+              </>
+            )}
+            <NumberField
+              label="高さ"
+              valueM={selected.height}
+              minM={LIMITS.furniture.min}
+              maxM={LIMITS.furniture.max}
+              testId="dim-height"
+              onPreview={(height) => updateFurniture(selected.id, { height }, "preview")}
+            />
+            <NumberField
+              label="位置 X（中心）"
+              valueM={selected.x}
+              minM={LIMITS.position.min}
+              maxM={LIMITS.position.max}
+              testId="pos-x"
+              onPreview={(x) => updateFurniture(selected.id, { x }, "preview")}
+            />
+            <NumberField
+              label="位置 Z（中心）"
+              valueM={selected.z}
+              minM={LIMITS.position.min}
+              maxM={LIMITS.position.max}
+              testId="pos-z"
+              onPreview={(z) => updateFurniture(selected.id, { z }, "preview")}
+            />
+            <div className="rotation-row">
+              <span>回転 {normalizeDegrees(selected.rotation).toFixed(0)}°</span>
+              <button type="button" onClick={() => rotateBy(selected.id, -90)}>
+                左へ 90°
+              </button>
+              <button type="button" onClick={() => rotateBy(selected.id, 90)}>
+                右へ 90°
+              </button>
+            </div>
+            <label className="field field-wide">
+              <span>色</span>
+              <input
+                type="color"
+                value={toColorInput(selected.color)}
+                data-testid="item-color"
+                onFocus={() => beginGesture()}
+                onChange={(event) => updateFurniture(selected.id, { color: event.target.value }, "preview")}
+                onBlur={() => endGesture()}
+              />
+            </label>
+            {issue && issue.overlapIds.length > 0 && (
+              <p className="warn" data-testid="overlap-warning">
+                他の家具と重なっています（{overlapNames.join("、")}）。
+              </p>
+            )}
+            {issue?.outOfRoom && (
+              <p className="warn" data-testid="bounds-warning">
+                部屋の外にはみ出しています。
+              </p>
+            )}
+            {issue?.exceedsCeiling && (
+              <p className="warn" data-testid="ceiling-warning">
+                高さが天井を超えています。
+              </p>
+            )}
+            <div className="list-actions">
+              <button type="button" onClick={() => duplicate(selected.id)}>
+                複製
+              </button>
+              <button type="button" className="danger" onClick={() => remove(selected.id)}>
+                削除
+              </button>
+            </div>
+          </>
+        )}
+      </section>
+    </aside>
+  );
+}
+
+function toColorInput(color: string): string {
+  return /^#[0-9a-fA-F]{6}$/.test(color) ? color : "#888888";
+}
