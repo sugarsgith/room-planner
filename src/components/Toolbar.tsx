@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { serializeProject } from "../domain/storage";
 import { downloadText } from "../lib/download";
 import { saveStatusLabel, useEditor } from "../state/store";
@@ -19,7 +19,18 @@ export function Toolbar() {
   const saveStatus = useEditor((s) => s.saveStatus);
   const savedAt = useEditor((s) => s.savedAt);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
   const statusText = saveStatusLabel(saveStatus, savedAt);
+
+  function openImport() {
+    setMoreOpen(false);
+    fileRef.current?.click();
+  }
+
+  function exportProject() {
+    setMoreOpen(false);
+    downloadText("room-planner.json", serializeProject(project), "application/json");
+  }
 
   return (
     <header className="toolbar">
@@ -80,28 +91,48 @@ export function Toolbar() {
             {statusText}
           </span>
         )}
-        <button
-          type="button"
-          onClick={() => downloadText("room-planner.json", serializeProject(project), "application/json")}
-        >
+      </div>
+      <div className="toolbar-group toolbar-secondary">
+        <button type="button" onClick={exportProject}>
           書き出し
         </button>
-        <button type="button" onClick={() => fileRef.current?.click()}>
+        <button type="button" onClick={openImport}>
           読み込み
         </button>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="application/json,.json"
-          hidden
-          onChange={async (event) => {
-            const file = event.target.files?.[0];
-            event.target.value = "";
-            if (!file) return;
-            importJson(await file.text());
-          }}
-        />
       </div>
+      <div className="toolbar-more">
+        <button
+          type="button"
+          aria-expanded={moreOpen}
+          aria-label="その他"
+          data-testid="toolbar-more"
+          onClick={() => setMoreOpen((open) => !open)}
+        >
+          …
+        </button>
+        {moreOpen && (
+          <div className="more-menu" data-testid="toolbar-more-menu">
+            <button type="button" onClick={exportProject}>
+              書き出し
+            </button>
+            <button type="button" onClick={openImport}>
+              読み込み
+            </button>
+          </div>
+        )}
+      </div>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="application/json,.json"
+        hidden
+        onChange={async (event) => {
+          const file = event.target.files?.[0];
+          event.target.value = "";
+          if (!file) return;
+          importJson(await file.text());
+        }}
+      />
       {importError && (
         <p className="import-error" data-testid="import-error" role="alert">
           読み込めませんでした。{importError}

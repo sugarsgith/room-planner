@@ -16,6 +16,9 @@ export function RoomScene() {
         dpr={[1, 2]}
         gl={{ antialias: true, alpha: false, preserveDrawingBuffer: true }}
         camera={{ fov: 42, near: 0.05, far: 80, position: [1.3, 4.2, -2.4] }}
+        onCreated={({ gl }) => {
+          gl.domElement.style.touchAction = "none";
+        }}
       >
         <color attach="background" args={["#d9d3c6"]} />
         <Scene />
@@ -78,6 +81,7 @@ function Scene() {
         maxPolarAngle={Math.PI / 2 - 0.04}
         minDistance={0.5}
         maxDistance={40}
+        touches={{ ONE: THREE.TOUCH.ROTATE, TWO: THREE.TOUCH.DOLLY_PAN }}
       />
       <MatchPlanCamera />
       <CameraRig />

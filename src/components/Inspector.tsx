@@ -30,7 +30,7 @@ export function Inspector() {
 
   return (
     <aside className="panel inspector" data-testid="inspector">
-      <section>
+      <section className="room-section">
         <div className="panel-head">
           <h2>部屋</h2>
         </div>
@@ -85,7 +85,7 @@ export function Inspector() {
         <FixturesSection />
       </section>
 
-      <section>
+      <section className="item-section">
         <div className="panel-head">
           <h2>選択中の家具</h2>
         </div>

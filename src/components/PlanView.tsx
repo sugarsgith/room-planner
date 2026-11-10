@@ -88,6 +88,21 @@ export function PlanView() {
     return () => observer.disconnect();
   }, [fit]);
 
+  useEffect(() => {
+    const phone = window.matchMedia("(max-width: 767px), (max-height: 500px) and (orientation: landscape)");
+    const onResize = () => {
+      if (!phone.matches) return;
+      userAdjusted.current = false;
+      fit();
+    };
+    window.addEventListener("resize", onResize);
+    window.addEventListener("orientationchange", onResize);
+    return () => {
+      window.removeEventListener("resize", onResize);
+      window.removeEventListener("orientationchange", onResize);
+    };
+  }, [fit]);
+
   const clientToWorld = useCallback((clientX: number, clientY: number) => {
     const svg = svgRef.current;
     if (!svg) return { x: 0, z: 0 };
@@ -110,6 +125,16 @@ export function PlanView() {
     setOffsetX(sx - world.x * next);
     setOffsetY(sy + world.z * next);
   }, [clientToWorld]);
+
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const blockScroll = (event: TouchEvent) => {
+      event.preventDefault();
+    };
+    svg.addEventListener("touchmove", blockScroll, { passive: false });
+    return () => svg.removeEventListener("touchmove", blockScroll);
+  }, []);
 
   useEffect(() => {
     const svg = svgRef.current;

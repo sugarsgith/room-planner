@@ -42,10 +42,19 @@ test("iPad-sized 2D, selection, overlap, and 3D", async ({ page }) => {
   await page.setViewportSize({ width: 1024, height: 768 });
   await page.goto("./");
   await expect(page.getByTestId("view-2d")).toBeVisible();
+  await expect(page.getByTestId("phone-tabs")).toBeHidden();
+  const list = await page.locator(".list-panel").boundingBox();
+  const view = await page.getByTestId("view-2d").boundingBox();
   const box = await page.getByTestId("inspector").boundingBox();
+  expect(list).not.toBeNull();
+  expect(view).not.toBeNull();
   expect(box).not.toBeNull();
+  expect(list!.x).toBeLessThan(view!.x);
+  expect(view!.x + view!.width).toBeLessThanOrEqual(box!.x + 2);
+  expect(view!.width).toBeGreaterThan(300);
   expect(box!.x + box!.width).toBeLessThanOrEqual(1024 + 1);
   await page.screenshot({ path: `${outDir}/room-2d-ipad.png` });
+  await page.screenshot({ path: `${outDir}/ipad-2d-1024.png` });
 
   await page.getByTestId("furniture-table").click();
   await expect(page.getByTestId("dim-width")).toBeVisible();
@@ -177,4 +186,45 @@ test("window, entrance, and allowed overlap", async ({ page }) => {
   await page.getByTestId("view-mode-3d").click();
   await page.waitForTimeout(800);
   await page.screenshot({ path: `${outDir}/room-window-entrance-3d-1440.png` });
+});
+
+test("iPhone portrait stacks the view and switches panels", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("./");
+  await expect(page.getByTestId("phone-tabs")).toBeVisible();
+  await expect(page.getByTestId("toolbar-more")).toBeVisible();
+  await expect(page.locator(".toolbar-secondary")).toBeHidden();
+  await page.getByTestId("save-button").click();
+  await expect(page.getByTestId("save-status")).toContainText("保存済み");
+
+  const view = await page.getByTestId("view-2d").boundingBox();
+  expect(view).not.toBeNull();
+  expect(view!.width).toBeGreaterThan(300);
+  expect(view!.height).toBeGreaterThan(300);
+  await page.screenshot({ path: `${outDir}/iphone-2d-390.png` });
+
+  await page.getByTestId("phone-tab-room").click();
+  await expect(page.getByTestId("room-width")).toBeVisible();
+  await expect(page.getByText("部屋の出っ張り")).toBeVisible();
+  await expect(page.getByTestId("furniture-bed")).toBeHidden();
+  await expect(page.getByTestId("item-name")).toBeHidden();
+  await page.screenshot({ path: `${outDir}/iphone-room-tab-390.png` });
+
+  await page.getByTestId("phone-tab-furniture").click();
+  await expect(page.getByTestId("furniture-bed")).toBeVisible();
+  await expect(page.getByTestId("room-width")).toBeHidden();
+  await page.getByTestId("furniture-sofa").click();
+  await expect(page.getByTestId("phone-tab-edit")).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByTestId("item-name")).toHaveValue("2人掛けソファ");
+  await expect(page.getByTestId("furniture-bed")).toBeHidden();
+  await expect(page.getByTestId("room-width")).toBeHidden();
+
+  await page.getByTestId("view-mode-3d").click();
+  await expect(page.getByTestId("view-3d")).toBeVisible();
+  const view3d = await page.getByTestId("view-3d").boundingBox();
+  expect(view3d).not.toBeNull();
+  expect(view3d!.width).toBeGreaterThan(300);
+  expect(view3d!.height).toBeGreaterThan(300);
+  await page.waitForTimeout(700);
+  await page.screenshot({ path: `${outDir}/iphone-3d-390.png` });
 });

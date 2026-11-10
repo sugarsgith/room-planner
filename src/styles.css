@@ -65,6 +65,24 @@ button.danger { color: var(--danger); border-color: #e3b2aa; }
 .brand span, .hint, .row-size, .status, .unit { color: var(--muted); }
 .brand span { font-size: 11px; }
 .toolbar-group { display: flex; gap: 4px; align-items: center; }
+.toolbar-more { display: none; position: relative; }
+.more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 132px;
+  padding: 6px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(30, 27, 22, 0.12);
+}
+.more-menu button { width: 100%; text-align: left; }
+.phone-tabs { display: none; }
 .save-status { font-size: 12px; color: var(--muted); white-space: nowrap; }
 .save-status.error { color: var(--danger); font-weight: 650; }
 .save-status.pending { color: #8a5a12; }
@@ -227,4 +245,64 @@ button.danger { color: var(--danger); border-color: #e3b2aa; }
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
   border: 0;
+}
+
+@media (max-width: 767px), (max-height: 500px) and (orientation: landscape) {
+  .toolbar { gap: 4px 6px; padding: 6px 8px; }
+  .toolbar button { padding: 3px 8px; font-size: 13px; }
+  .brand { min-width: 0; order: 0; }
+  .brand strong { font-size: 14px; }
+  .brand span { display: none; }
+  .toolbar-group[aria-label="表示切替"] { order: 1; }
+  .toolbar > .toolbar-group:has([data-testid="save-button"]) { order: 2; }
+  .toolbar-more { display: block; order: 3; }
+  .toolbar > .toolbar-group:not(.toolbar-secondary):not(:has([data-testid="save-button"])):not([aria-label="表示切替"]) { order: 4; }
+  .toolbar-secondary { display: none; }
+  .workspace {
+    display: flex;
+    flex-direction: column;
+  }
+  .stage {
+    order: 0;
+    flex: 0 0 55dvh;
+    height: 55dvh;
+    width: 100%;
+    min-height: 0;
+    touch-action: none;
+  }
+  .phone-tabs {
+    order: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 4px;
+    padding: 6px 8px;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line);
+    flex: none;
+  }
+  .list-panel,
+  .inspector {
+    order: 2;
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    border: 0;
+  }
+  .workspace[data-phone-tab="list"] .inspector,
+  .workspace[data-phone-tab="edit"] .list-panel,
+  .workspace[data-phone-tab="room"] .list-panel,
+  .workspace[data-phone-tab="edit"] .room-section,
+  .workspace[data-phone-tab="room"] .item-section {
+    display: none;
+  }
+  .status { gap: 8px; }
+  .status-help { display: none; }
+  .field input,
+  .field select,
+  .field-wide input,
+  .field-wide select,
+  select,
+  textarea {
+    font-size: 16px;
+  }
 }

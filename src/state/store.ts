@@ -25,6 +25,7 @@ interface Snapshot {
 export interface EditorState {
   project: Project;
   selectedId: string | null;
+  selectionSeq: number;
   past: Snapshot[];
   future: Snapshot[];
   gestureBefore: Snapshot | null;
@@ -174,6 +175,7 @@ export const useEditor = create<EditorState>((set, get) => {
   return {
     project: createInitialProject(),
     selectedId: null,
+    selectionSeq: 0,
     past: [],
     future: [],
     gestureBefore: null,
@@ -190,7 +192,11 @@ export const useEditor = create<EditorState>((set, get) => {
     saveStatus: "idle",
     savedAt: null,
 
-    select: (id) => set({ selectedId: id }),
+    select: (id) =>
+      set((state) => ({
+        selectedId: id,
+        selectionSeq: id ? state.selectionSeq + 1 : state.selectionSeq,
+      })),
     setViewMode: (mode) => set({ viewMode: mode }),
     setWallsVisible: (wallsVisible) => set({ wallsVisible }),
     setWallsTransparent: (wallsTransparent) => set({ wallsTransparent }),
@@ -523,6 +529,7 @@ export function initEditor(storage: KeyValueStorage, options?: { autosaveDelayMs
   useEditor.setState({
     project: loaded.project,
     selectedId: null,
+    selectionSeq: 0,
     past: [],
     future: [],
     gestureBefore: null,

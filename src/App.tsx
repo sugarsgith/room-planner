@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FurnitureList } from "./components/FurnitureList";
 import { Inspector } from "./components/Inspector";
 import { PlanView } from "./components/PlanView";
@@ -18,12 +18,18 @@ export function App() {
   const resumePersist = useEditor((s) => s.resumePersist);
   const project = useEditor((s) => s.project);
   const selectedId = useEditor((s) => s.selectedId);
+  const selectionSeq = useEditor((s) => s.selectionSeq);
   useHistoryKeys();
 
   const furniture = activeFurniture(project);
   const issues = useMemo(() => analyzeLayout(project.room, furniture), [project.room, furniture]);
   const problemCount = issues.filter((issue) => issueIsActive(issue)).length;
   const selected = furniture.find((item) => item.id === selectedId);
+  const [phoneTab, setPhoneTab] = useState<"list" | "edit" | "room">("list");
+
+  useEffect(() => {
+    if (selectionSeq > 0) setPhoneTab("edit");
+  }, [selectionSeq]);
 
   return (
     <div className="app">
@@ -53,9 +59,40 @@ export function App() {
           <p>{loadError}</p>
         </div>
       )}
-      <div className="workspace">
+      <div className="workspace" data-phone-tab={phoneTab}>
         <FurnitureList />
-        <main className="stage">{viewMode === "2d" ? <PlanView /> : <RoomScene />}</main>
+        <main className="stage" data-testid="stage">
+          {viewMode === "2d" ? <PlanView /> : <RoomScene />}
+        </main>
+        <nav className="phone-tabs" data-testid="phone-tabs" aria-label="パネル">
+          <button
+            type="button"
+            className={phoneTab === "list" ? "active" : ""}
+            aria-pressed={phoneTab === "list"}
+            data-testid="phone-tab-furniture"
+            onClick={() => setPhoneTab("list")}
+          >
+            家具
+          </button>
+          <button
+            type="button"
+            className={phoneTab === "edit" ? "active" : ""}
+            aria-pressed={phoneTab === "edit"}
+            data-testid="phone-tab-edit"
+            onClick={() => setPhoneTab("edit")}
+          >
+            編集
+          </button>
+          <button
+            type="button"
+            className={phoneTab === "room" ? "active" : ""}
+            aria-pressed={phoneTab === "room"}
+            data-testid="phone-tab-room"
+            onClick={() => setPhoneTab("room")}
+          >
+            部屋
+          </button>
+        </nav>
         <Inspector />
       </div>
       <footer className="status" data-testid="status-bar">
