@@ -1,10 +1,14 @@
 import {
+  WINDOW_NOTE_DEPTH_M,
   beamFootprints,
+  entranceSectors,
   furnitureBottom,
   furnitureTop,
   obstacleFootprint,
+  openingFront,
   pointInSector,
   storageSectors,
+  windowRecess,
   type Aabb,
   type Sector,
 } from "./fixtures";
@@ -163,19 +167,54 @@ function cornerOutside(
  */
 export function isOutsideRoom(
   item: Furniture,
-  room: Pick<Room, "width" | "depth">,
+  room: Pick<Room, "width" | "depth" | "fixtures">,
   eps = OVERLAP_EPSILON_M,
 ): boolean {
+  const samples = outsideSamples(item);
+  return samples.some((point) => !pointInsideUsable(point, item, room, eps));
+}
+
+function outsideSamples(item: Furniture): { x: number; z: number }[] {
   if (item.shape === "cylinder") {
-    const r = item.width / 2;
-    return (
-      item.x - r < -eps ||
-      item.z - r < -eps ||
-      item.x + r > room.width + eps ||
-      item.z + r > room.depth + eps
-    );
+    const points = [{ x: item.x, z: item.z }];
+    const radius = item.width / 2;
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      points.push({ x: item.x + Math.cos(angle) * radius, z: item.z + Math.sin(angle) * radius });
+    }
+    return points;
   }
-  return footprintCorners(item).some((p) => cornerOutside(p, room.width, room.depth, eps));
+  return footprintCorners(item);
+}
+
+function pointInsideUsable(
+  point: { x: number; z: number },
+  item: Furniture,
+  room: Pick<Room, "width" | "depth" | "fixtures">,
+  eps: number,
+): boolean {
+  if (!cornerOutside(point, room.width, room.depth, eps)) return true;
+  const sill = recessSillAt(point, room, eps);
+  if (sill === null) return false;
+  return furnitureBottom(item) + eps >= sill;
+}
+
+/** Sill height of a window recess containing the point, or null when the point is not in a recess. */
+function recessSillAt(
+  point: { x: number; z: number },
+  room: Pick<Room, "width" | "depth" | "fixtures">,
+  eps: number,
+): number | null {
+  for (const fixture of room.fixtures ?? []) {
+    if (fixture.type !== "window" || fixture.recess <= 0) continue;
+    const recess = windowRecess(fixture, room);
+    if (recess && pointInAabb(point, recess, eps)) return fixture.sillHeight;
+  }
+  return null;
+}
+
+function pointInAabb(point: { x: number; z: number }, box: Aabb, eps: number): boolean {
+  return point.x >= box.minX - eps && point.x <= box.maxX + eps && point.z >= box.minZ - eps && point.z <= box.maxZ + eps;
 }
 
 export function exceedsCeiling(item: Furniture, ceilingHeight: number, eps = OVERLAP_EPSILON_M): boolean {
@@ -190,6 +229,11 @@ export interface ItemIssue {
   fixtureOverlapIds: string[];
   swingFixtureIds: string[];
   beamFixtureIds: string[];
+  /** Recess placement problems (below the sill, or above the window head). */
+  recessFixtureIds: string[];
+  entranceFixtureIds: string[];
+  /** Informational only: a tall item stands in front of the glass. */
+  windowNoteIds: string[];
 }
 
 export function issueIsActive(issue: ItemIssue): boolean {
@@ -199,8 +243,23 @@ export function issueIsActive(issue: ItemIssue): boolean {
     issue.overlapIds.length > 0 ||
     issue.fixtureOverlapIds.length > 0 ||
     issue.swingFixtureIds.length > 0 ||
-    issue.beamFixtureIds.length > 0
+    issue.beamFixtureIds.length > 0 ||
+    issue.recessFixtureIds.length > 0 ||
+    issue.entranceFixtureIds.length > 0
   );
+}
+
+export function pairAllowsOverlap(a: Furniture, b: Furniture): boolean {
+  return (a.allowOverlapIds ?? []).includes(b.id) || (b.allowOverlapIds ?? []).includes(a.id);
+}
+
+/** This item lists the other and their footprints actually overlap, so 2D draws it on top and lighter. */
+export function drawsAsAllowedOverlap(item: Furniture, items: Furniture[]): boolean {
+  return items.some((other) => {
+    if (other.id === item.id) return false;
+    if (!(item.allowOverlapIds ?? []).includes(other.id)) return false;
+    return footprintsOverlap(item, other) && verticalOverlap(furnitureBottom(item), furnitureTop(item), furnitureBottom(other), furnitureTop(other));
+  });
 }
 
 function verticalOverlap(bottomA: number, topA: number, bottomB: number, topB: number, eps = OVERLAP_EPSILON_M): boolean {
@@ -212,7 +271,7 @@ export function analyzeLayout(room: Room, items: Furniture[]): ItemIssue[] {
   return items.map((item) => {
     const overlapIds: string[] = [];
     for (const other of items) {
-      if (other.id === item.id) continue;
+      if (other.id === item.id || pairAllowsOverlap(item, other)) continue;
       const stacked = verticalOverlap(furnitureBottom(item), furnitureTop(item), furnitureBottom(other), furnitureTop(other));
       if (stacked && footprintsOverlap(item, other)) overlapIds.push(other.id);
     }
@@ -220,9 +279,21 @@ export function analyzeLayout(room: Room, items: Furniture[]): ItemIssue[] {
     const fixtureOverlapIds: string[] = [];
     const swingFixtureIds: string[] = [];
     const beamFixtureIds: string[] = [];
+    const recessFixtureIds: string[] = [];
+    const entranceFixtureIds: string[] = [];
+    const windowNoteIds: string[] = [];
     for (const fixture of fixtures) {
       if (fixture.type === "beam") {
         if (hitsBeam(item, fixture, room)) beamFixtureIds.push(fixture.id);
+        continue;
+      }
+      if (fixture.type === "window") {
+        if (hitsRecessProblem(item, fixture, room)) recessFixtureIds.push(fixture.id);
+        if (coversWindow(item, fixture, room)) windowNoteIds.push(fixture.id);
+        continue;
+      }
+      if (fixture.type === "entrance") {
+        if (blocksEntrance(item, fixture, room)) entranceFixtureIds.push(fixture.id);
         continue;
       }
       const box = obstacleFootprint(fixture, room);
@@ -234,9 +305,9 @@ export function analyzeLayout(room: Room, items: Furniture[]): ItemIssue[] {
       }
       if (fixture.type === "storage" && hitsSwing(item, fixture, room)) swingFixtureIds.push(fixture.id);
     }
-    fixtureOverlapIds.sort();
-    swingFixtureIds.sort();
-    beamFixtureIds.sort();
+    for (const list of [fixtureOverlapIds, swingFixtureIds, beamFixtureIds, recessFixtureIds, entranceFixtureIds, windowNoteIds]) {
+      list.sort();
+    }
     return {
       id: item.id,
       outOfRoom: isOutsideRoom(item, room),
@@ -245,8 +316,32 @@ export function analyzeLayout(room: Room, items: Furniture[]): ItemIssue[] {
       fixtureOverlapIds,
       swingFixtureIds,
       beamFixtureIds,
+      recessFixtureIds,
+      entranceFixtureIds,
+      windowNoteIds,
     };
   });
+}
+
+function hitsRecessProblem(item: Furniture, fixture: Extract<RoomFixture, { type: "window" }>, room: Room): boolean {
+  const recess = windowRecess(fixture, room);
+  if (!recess || !footprintHitsAabb(item, recess)) return false;
+  const bottom = furnitureBottom(item);
+  const top = furnitureTop(item);
+  return bottom < fixture.sillHeight - OVERLAP_EPSILON_M || top > fixture.sillHeight + fixture.height + OVERLAP_EPSILON_M;
+}
+
+function coversWindow(item: Furniture, fixture: Extract<RoomFixture, { type: "window" }>, room: Room): boolean {
+  const zone = openingFront(fixture.wall, fixture.offset, fixture.width, WINDOW_NOTE_DEPTH_M, room);
+  if (!zone || !footprintHitsAabb(item, zone)) return false;
+  return verticalOverlap(furnitureBottom(item), furnitureTop(item), fixture.sillHeight, fixture.sillHeight + fixture.height);
+}
+
+function blocksEntrance(item: Furniture, fixture: Extract<RoomFixture, { type: "entrance" }>, room: Room): boolean {
+  if (!verticalOverlap(furnitureBottom(item), furnitureTop(item), 0, fixture.height)) return false;
+  const zone = openingFront(fixture.wall, fixture.offset, fixture.width, fixture.clearance, room);
+  if (zone && footprintHitsAabb(item, zone)) return true;
+  return entranceSectors(fixture, room).some((sector) => footprintHitsSector(item, sector));
 }
 
 function aabbItem(box: Aabb): Furniture {

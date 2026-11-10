@@ -179,9 +179,44 @@ export function Inspector() {
                 onBlur={() => endGesture()}
               />
             </label>
+            <fieldset className="allow-list" data-testid="allow-overlap">
+              <legend>重なってもいい家具</legend>
+              {furniture.filter((item) => item.id !== selected.id).map((item) => (
+                <label key={item.id} className="check">
+                  <input
+                    type="checkbox"
+                    data-testid={`allow-${item.id}`}
+                    checked={(selected.allowOverlapIds ?? []).includes(item.id)}
+                    onChange={() => {
+                      const current = selected.allowOverlapIds ?? [];
+                      const allowOverlapIds = current.includes(item.id)
+                        ? current.filter((id) => id !== item.id)
+                        : [...current, item.id];
+                      updateFurniture(selected.id, { allowOverlapIds }, "commit");
+                    }}
+                  />
+                  {item.name}
+                </label>
+              ))}
+            </fieldset>
             {issue && issue.overlapIds.length > 0 && (
               <p className="warn" data-testid="overlap-warning">
                 他の家具と重なっています（{overlapNames.join("、")}）。
+              </p>
+            )}
+            {issue && issue.recessFixtureIds.length > 0 && (
+              <p className="warn" data-testid="recess-warning">
+                窓の出幅の中で、下端より低いか上端を超えています。
+              </p>
+            )}
+            {issue && issue.entranceFixtureIds.length > 0 && (
+              <p className="warn" data-testid="entrance-warning">
+                入口をふさいでいます。
+              </p>
+            )}
+            {issue && issue.windowNoteIds.length > 0 && (
+              <p className="info" data-testid="window-note">
+                窓にかかっています。
               </p>
             )}
             {issue?.outOfRoom && (

@@ -68,7 +68,7 @@ export interface EditorState {
 export type SaveStatus = "idle" | "pending" | "saved" | "error";
 
 export type FurniturePatch = Partial<
-  Pick<Furniture, "name" | "shape" | "width" | "depth" | "height" | "x" | "z" | "rotation" | "color" | "elevation">
+  Pick<Furniture, "name" | "shape" | "width" | "depth" | "height" | "x" | "z" | "rotation" | "color" | "elevation" | "allowOverlapIds">
 >;
 
 export type RoomPatch = Partial<Pick<Room, "name" | "width" | "depth" | "ceilingHeight">>;
@@ -283,7 +283,14 @@ export const useEditor = create<EditorState>((set, get) => {
       if (!activeFurniture(project).some((item) => item.id === id)) return;
       const selectedId = get().selectedId === id ? null : get().selectedId;
       commitProject(
-        mapActive(project, (items) => items.filter((item) => item.id !== id)),
+        mapActive(project, (items) =>
+          items
+            .filter((item) => item.id !== id)
+            .map((item) => ({
+              ...item,
+              allowOverlapIds: (item.allowOverlapIds ?? []).filter((other) => other !== id),
+            })),
+        ),
         selectedId,
       );
     },
@@ -461,6 +468,7 @@ function applyFurniturePatch(item: Furniture, patch: FurniturePatch): Furniture 
   const name = patch.name !== undefined ? patch.name : item.name;
   const color = patch.color !== undefined ? patch.color : item.color;
   const elevation = patch.elevation !== undefined ? roundM(patch.elevation) : (item.elevation ?? 0);
+  const allowOverlapIds = patch.allowOverlapIds !== undefined ? [...patch.allowOverlapIds] : item.allowOverlapIds;
   if (shape === "cylinder") {
     if (patch.width !== undefined) depth = width;
     else if (patch.depth !== undefined) width = depth;
@@ -473,7 +481,8 @@ function applyFurniturePatch(item: Furniture, patch: FurniturePatch): Furniture 
   if (typeof name !== "string" || name.trim().length === 0 || name.length > LIMITS.name.max) return null;
   if (!/^#[0-9a-fA-F]{6}$/.test(color)) return null;
   if (!Number.isFinite(elevation) || elevation < 0 || elevation > 20) return null;
-  return { ...item, name, shape, width, depth, height, x, z, rotation, color, elevation };
+  if (allowOverlapIds !== undefined && allowOverlapIds.some((other) => other === item.id)) return null;
+  return { ...item, name, shape, width, depth, height, x, z, rotation, color, elevation, allowOverlapIds };
 }
 
 function applyRoomPatch(room: Room, patch: RoomPatch): Room | null {

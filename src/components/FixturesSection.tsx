@@ -6,13 +6,25 @@ import {
   fixtureError,
   fixtureLabel,
   wallLabel,
+  wallStartLabel,
 } from "../domain/fixtures";
-import type { PlanCorner, PlanWall, Room, RoomFixture, StorageDoor, StorageFixture } from "../domain/types";
-import { cmToM } from "../domain/units";
+import type {
+  EntranceDoor,
+  EntranceFixture,
+  PlanCorner,
+  PlanWall,
+  Room,
+  RoomFixture,
+  StorageDoor,
+  StorageFixture,
+  WindowFixture,
+  WindowStyle,
+} from "../domain/types";
+import { cmToM, formatCm } from "../domain/units";
 import { useEditor } from "../state/store";
 import { NumberField } from "./fields";
 
-type DraftKind = "pillar" | "storage" | "beam";
+type DraftKind = "pillar" | "storage" | "beam" | "window" | "entrance";
 
 interface Draft {
   kind: DraftKind;
@@ -30,6 +42,12 @@ interface Draft {
   beamWalls: PlanWall[];
   protrusionCm: string;
   dropCm: string;
+  openingWall: PlanWall;
+  sillCm: string;
+  recessCm: string;
+  windowStyle: WindowStyle;
+  entranceDoor: EntranceDoor;
+  clearanceCm: string;
 }
 
 function emptyDraft(kind: DraftKind): Draft {
@@ -49,6 +67,12 @@ function emptyDraft(kind: DraftKind): Draft {
     beamWalls: [],
     protrusionCm: "",
     dropCm: "",
+    openingWall: kind === "entrance" ? "front" : "back",
+    sillCm: "",
+    recessCm: "",
+    windowStyle: "sliding",
+    entranceDoor: "none",
+    clearanceCm: kind === "entrance" ? "60" : "",
   };
 }
 
@@ -118,10 +142,27 @@ export function FixturesSection() {
         <button type="button" data-testid="fixture-add-beam" onClick={() => { setDraft(emptyDraft("beam")); setDraftError(null); }}>
           ＋天井の梁
         </button>
+        <button type="button" data-testid="fixture-add-window" onClick={() => { setDraft(emptyDraft("window")); setDraftError(null); }}>
+          ＋窓
+        </button>
+        <button
+          type="button"
+          data-testid="fixture-add-entrance"
+          onClick={() => {
+            const next = emptyDraft("entrance");
+            next.heightCm = formatCm(room.ceilingHeight);
+            setDraft(next);
+            setDraftError(null);
+          }}
+        >
+          ＋入口
+        </button>
       </div>
       {draft && (
         <div className="draft">
-          <p className="hint">{draft.kind === "pillar" ? "柱" : draft.kind === "storage" ? "備え付け収納" : "天井の梁"}</p>
+          <p className="hint">
+            {draft.kind === "pillar" ? "柱" : draft.kind === "storage" ? "備え付け収納" : draft.kind === "beam" ? "天井の梁" : draft.kind === "window" ? "窓" : "入口"}
+          </p>
           {draft.kind !== "beam" && (
             <AnchorFields
               anchorKind={draft.anchorKind}
@@ -162,6 +203,9 @@ export function FixturesSection() {
                 </div>
               )}
             </>
+          )}
+          {(draft.kind === "window" || draft.kind === "entrance") && (
+            <OpeningDraft draft={draft} onChange={(patch) => setDraft({ ...draft, ...patch })} />
           )}
           {draft.kind === "beam" && (
             <>
@@ -288,7 +332,9 @@ function FixtureFields({
   const heightMax = Math.max(0.001, room.ceilingHeight - 0.001);
   return (
     <>
-      {fixture.type !== "beam" && <EditAnchor fixture={fixture} onChange={onChange} />}
+      {(fixture.type === "pillar" || fixture.type === "storage") && <EditAnchor fixture={fixture} onChange={onChange} />}
+      {fixture.type === "window" && <WindowFields fixture={fixture} onChange={onChange} />}
+      {fixture.type === "entrance" && <EntranceFields fixture={fixture} room={room} onChange={onChange} />}
       {fixture.type === "pillar" && (
         <>
           <NumberField label="横の出っ張り" valueM={fixture.spanX} minM={0.001} maxM={10} testId="edit-span-x" onPreview={(spanX) => onChange({ ...fixture, spanX })} />
@@ -459,7 +505,177 @@ function DoorFields({
   );
 }
 
+function OpeningDraft({ draft, onChange }: { draft: Draft; onChange: (patch: Partial<Draft>) => void }) {
+  const walls: PlanWall[] = ["back", "right", "front", "left"];
+  return (
+    <>
+      <label className="field field-wide">
+        <span>壁</span>
+        <select data-testid="fixture-opening-wall" value={draft.openingWall} onChange={(event) => onChange({ openingWall: event.target.value as PlanWall })}>
+          {walls.map((wall) => (
+            <option key={wall} value={wall}>
+              {wallLabel(wall)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <CmInput
+        label={wallStartLabel(draft.openingWall)}
+        value={draft.offsetCm}
+        testId="fixture-opening-offset"
+        onChange={(offsetCm) => onChange({ offsetCm })}
+      />
+      <CmInput label="幅" value={draft.widthCm} testId="fixture-opening-width" onChange={(widthCm) => onChange({ widthCm })} />
+      {draft.kind === "window" ? (
+        <>
+          <CmInput label="床から下端までの高さ" value={draft.sillCm} testId="fixture-window-sill" onChange={(sillCm) => onChange({ sillCm })} />
+          <CmInput label="窓の高さ" value={draft.heightCm} testId="fixture-window-height" onChange={(heightCm) => onChange({ heightCm })} />
+          <CmInput label="壁より奥に出ている量" value={draft.recessCm} testId="fixture-window-recess" onChange={(recessCm) => onChange({ recessCm })} />
+          <label className="field field-wide">
+            <span>種類</span>
+            <select data-testid="fixture-window-style" value={draft.windowStyle} onChange={(event) => onChange({ windowStyle: event.target.value as WindowStyle })}>
+              <option value="sliding">引き違い（2枚）</option>
+              <option value="other">その他</option>
+            </select>
+          </label>
+        </>
+      ) : (
+        <>
+          <CmInput label="開口の高さ" value={draft.heightCm} testId="fixture-entrance-height" onChange={(heightCm) => onChange({ heightCm })} />
+          <CmInput label="入口前の空き" value={draft.clearanceCm} testId="fixture-entrance-clearance" onChange={(clearanceCm) => onChange({ clearanceCm })} />
+          <label className="field field-wide">
+            <span>扉</span>
+            <select data-testid="fixture-entrance-door" value={draft.entranceDoor} onChange={(event) => onChange({ entranceDoor: event.target.value as EntranceDoor })}>
+              <option value="none">なし</option>
+              <option value="single">片開き</option>
+              <option value="sliding">引き戸</option>
+            </select>
+          </label>
+          {draft.entranceDoor === "single" && (
+            <div className="choice">
+              <button type="button" className={draft.hinge === "left" ? "active" : ""} onClick={() => onChange({ hinge: "left" })}>
+                吊元 左
+              </button>
+              <button type="button" className={draft.hinge === "right" ? "active" : ""} onClick={() => onChange({ hinge: "right" })}>
+                吊元 右
+              </button>
+            </div>
+          )}
+        </>
+      )}
+    </>
+  );
+}
+
+function WindowFields({ fixture, onChange }: { fixture: WindowFixture; onChange: (fixture: RoomFixture) => void }) {
+  return (
+    <>
+      <WallSelect testId="edit-window-wall" wall={fixture.wall} onChange={(wall) => onChange({ ...fixture, wall })} />
+      <NumberField label={wallStartLabel(fixture.wall)} valueM={fixture.offset} minM={0} maxM={20} testId="edit-window-offset" onPreview={(offset) => onChange({ ...fixture, offset })} />
+      <NumberField label="幅" valueM={fixture.width} minM={0.001} maxM={10} testId="edit-window-width" onPreview={(width) => onChange({ ...fixture, width })} />
+      <NumberField label="床から下端までの高さ" valueM={fixture.sillHeight} minM={0} maxM={10} testId="edit-window-sill" onPreview={(sillHeight) => onChange({ ...fixture, sillHeight })} />
+      <NumberField label="窓の高さ" valueM={fixture.height} minM={0.001} maxM={10} testId="edit-window-height" onPreview={(height) => onChange({ ...fixture, height })} />
+      <NumberField label="壁より奥に出ている量" valueM={fixture.recess} minM={0} maxM={5} testId="edit-window-recess" onPreview={(recess) => onChange({ ...fixture, recess })} />
+      <label className="field field-wide">
+        <span>種類</span>
+        <select data-testid="edit-window-style" value={fixture.style} onChange={(event) => onChange({ ...fixture, style: event.target.value as WindowStyle })}>
+          <option value="sliding">引き違い（2枚）</option>
+          <option value="other">その他</option>
+        </select>
+      </label>
+    </>
+  );
+}
+
+function EntranceFields({
+  fixture,
+  room,
+  onChange,
+}: {
+  fixture: EntranceFixture;
+  room: Room;
+  onChange: (fixture: RoomFixture) => void;
+}) {
+  return (
+    <>
+      <WallSelect testId="edit-entrance-wall" wall={fixture.wall} onChange={(wall) => onChange({ ...fixture, wall })} />
+      <NumberField label={wallStartLabel(fixture.wall)} valueM={fixture.offset} minM={0} maxM={20} testId="edit-entrance-offset" onPreview={(offset) => onChange({ ...fixture, offset })} />
+      <NumberField label="開口の幅" valueM={fixture.width} minM={0.001} maxM={10} testId="edit-entrance-width" onPreview={(width) => onChange({ ...fixture, width })} />
+      <NumberField label="開口の高さ" valueM={fixture.height} minM={0.001} maxM={room.ceilingHeight} testId="edit-entrance-height" onPreview={(height) => onChange({ ...fixture, height })} />
+      <NumberField label="入口前の空き" valueM={fixture.clearance} minM={0} maxM={10} testId="edit-entrance-clearance" onPreview={(clearance) => onChange({ ...fixture, clearance })} />
+      <label className="field field-wide">
+        <span>扉</span>
+        <select data-testid="edit-entrance-door" value={fixture.door} onChange={(event) => onChange({ ...fixture, door: event.target.value as EntranceDoor })}>
+          <option value="none">なし</option>
+          <option value="single">片開き</option>
+          <option value="sliding">引き戸</option>
+        </select>
+      </label>
+      {fixture.door === "single" && (
+        <div className="choice">
+          <button type="button" data-testid="edit-entrance-hinge-left" className={fixture.hinge === "left" ? "active" : ""} onClick={() => onChange({ ...fixture, hinge: "left" })}>
+            吊元 左
+          </button>
+          <button type="button" data-testid="edit-entrance-hinge-right" className={fixture.hinge === "right" ? "active" : ""} onClick={() => onChange({ ...fixture, hinge: "right" })}>
+            吊元 右
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function WallSelect({ wall, onChange, testId }: { wall: PlanWall; onChange: (wall: PlanWall) => void; testId: string }) {
+  return (
+    <label className="field field-wide">
+      <span>壁</span>
+      <select data-testid={testId} value={wall} onChange={(event) => onChange(event.target.value as PlanWall)}>
+        {(["back", "right", "front", "left"] as PlanWall[]).map((item) => (
+          <option key={item} value={item}>
+            {wallLabel(item)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
 function draftToFixture(draft: Draft, id: string): RoomFixture | null {
+  if (draft.kind === "window" || draft.kind === "entrance") {
+    const offset = readCm(draft.offsetCm);
+    const width = readCm(draft.widthCm);
+    const height = readCm(draft.heightCm);
+    if (offset === null || width === null || height === null) return null;
+    if (draft.kind === "window") {
+      const sill = readCm(draft.sillCm, true);
+      const recess = readCm(draft.recessCm, true);
+      if (sill === null || recess === null) return null;
+      return {
+        id,
+        type: "window",
+        wall: draft.openingWall,
+        offset,
+        width,
+        sillHeight: sill,
+        height,
+        recess,
+        style: draft.windowStyle,
+      };
+    }
+    const clearance = readCm(draft.clearanceCm, true);
+    if (clearance === null) return null;
+    return {
+      id,
+      type: "entrance",
+      wall: draft.openingWall,
+      offset,
+      width,
+      height,
+      door: draft.entranceDoor,
+      hinge: draft.hinge,
+      clearance,
+    };
+  }
   if (draft.kind === "beam") {
     const protrusion = readCm(draft.protrusionCm);
     const drop = readCm(draft.dropCm);
@@ -484,12 +700,12 @@ function draftToFixture(draft: Draft, id: string): RoomFixture | null {
   return { id, type: "storage", anchor, width, depth, height, door: draft.door, hinge: draft.hinge };
 }
 
-function readCm(raw: string): number | null {
+function readCm(raw: string, allowZero = false): number | null {
   if (raw.trim() === "") return null;
   const n = Number(raw);
-  if (!Number.isFinite(n) || n <= 0) return null;
+  if (!Number.isFinite(n) || n < 0 || (!allowZero && n === 0)) return null;
   const meters = cmToM(n);
-  if (meters <= 0) return null;
+  if (!allowZero && meters <= 0) return null;
   return meters;
 }
 

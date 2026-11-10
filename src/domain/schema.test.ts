@@ -27,7 +27,7 @@ describe("import validation", () => {
   });
 
   it("rejects the wrong schema version", () => {
-    for (const schemaVersion of [0, 3, "1", "2", null]) {
+    for (const schemaVersion of [0, 4, "1", "2", null]) {
       const result = validateProject({ ...sample(), schemaVersion });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toContain("schemaVersion");
@@ -42,8 +42,9 @@ describe("import validation", () => {
     const result = validateProject(legacy);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.project.schemaVersion).toBe(2);
+      expect(result.project.schemaVersion).toBe(3);
       expect(result.project.room.fixtures).toEqual([]);
+      expect(result.project.layouts[0].furniture[0].allowOverlapIds).toEqual([]);
       expect(result.project.layouts[0].furniture.map((item) => item.name)).toEqual([
         "シングルベッド",
         "デスク",
@@ -51,6 +52,28 @@ describe("import validation", () => {
         "丸テーブル",
       ]);
       expect(result.project.layouts[0].furniture[0].elevation).toBe(0);
+    }
+  });
+
+  it("migrates a version 2 file without dropping fixtures", () => {
+    const legacy = sample();
+    legacy.schemaVersion = 2;
+    legacy.room.fixtures = [
+      {
+        id: "pillar-1",
+        type: "pillar",
+        anchor: { kind: "corner", corner: "back-left" },
+        spanX: 0.3,
+        spanZ: 0.3,
+      },
+    ];
+    for (const item of legacy.layouts[0].furniture) delete item.allowOverlapIds;
+    const result = validateProject(legacy);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.project.schemaVersion).toBe(3);
+      expect(result.project.room.fixtures).toHaveLength(1);
+      expect(result.project.layouts[0].furniture[0].allowOverlapIds).toEqual([]);
       expect(result.project.layouts[0].furniture[0].x).toBe(legacy.layouts[0].furniture[0].x);
     }
   });

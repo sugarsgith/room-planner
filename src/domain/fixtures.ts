@@ -8,6 +8,8 @@ import type {
   RoomFixture,
   StorageDoor,
   StorageFixture,
+  WindowFixture,
+  EntranceFixture,
 } from "./types";
 
 /** Same tolerance as footprint overlap: touching is not a hit. */
@@ -212,7 +214,173 @@ export function arcPoints(sector: Sector, steps = 16): Point[] {
 export function fixtureLabel(fixture: RoomFixture): string {
   if (fixture.type === "pillar") return `柱（${anchorLabel(fixture.anchor)}）`;
   if (fixture.type === "storage") return `備え付け収納（${anchorLabel(fixture.anchor)}）`;
+  if (fixture.type === "window") return `窓（${wallLabel(fixture.wall)}）`;
+  if (fixture.type === "entrance") return `入口（${wallLabel(fixture.wall)}）`;
   return `天井の梁（${fixture.walls.map(wallLabel).join("・")}）`;
+}
+
+/** Where “始点から” is measured, matching the outline walk used by every wall fixture. */
+export function wallStartLabel(wall: PlanWall): string {
+  switch (wall) {
+    case "back":
+      return "右端から";
+    case "front":
+      return "左端から";
+    case "right":
+      return "手前から";
+    case "left":
+      return "奥から";
+  }
+}
+
+export interface OpeningPlacement {
+  start: Point;
+  end: Point;
+  into: Point;
+  outward: Point;
+}
+
+export function openingPlacement(
+  wall: PlanWall,
+  offset: number,
+  width: number,
+  room: Pick<Room, "width" | "depth">,
+): OpeningPlacement | null {
+  if (!(width > 0)) return null;
+  const frame = wallFrame(wall, room);
+  const start = {
+    x: frame.origin.x + frame.along.x * offset,
+    z: frame.origin.z + frame.along.z * offset,
+  };
+  const end = {
+    x: frame.origin.x + frame.along.x * (offset + width),
+    z: frame.origin.z + frame.along.z * (offset + width),
+  };
+  return { start, end, into: frame.into, outward: { x: -frame.into.x, z: -frame.into.z } };
+}
+
+export function extrudedAabb(place: OpeningPlacement, depth: number, direction: Point): Aabb | null {
+  if (!(depth > 0)) return null;
+  const farA = { x: place.start.x + direction.x * depth, z: place.start.z + direction.z * depth };
+  const farB = { x: place.end.x + direction.x * depth, z: place.end.z + direction.z * depth };
+  return aabb(
+    Math.min(place.start.x, place.end.x, farA.x, farB.x),
+    Math.max(place.start.x, place.end.x, farA.x, farB.x),
+    Math.min(place.start.z, place.end.z, farA.z, farB.z),
+    Math.max(place.start.z, place.end.z, farA.z, farB.z),
+  );
+}
+
+export function windowRecess(fixture: WindowFixture, room: Pick<Room, "width" | "depth">): Aabb | null {
+  const place = openingPlacement(fixture.wall, fixture.offset, fixture.width, room);
+  if (!place) return null;
+  return extrudedAabb(place, fixture.recess, place.outward);
+}
+
+/** Interior floor in front of an opening, `depth` meters into the room. */
+export function openingFront(wall: PlanWall, offset: number, width: number, depth: number, room: Pick<Room, "width" | "depth">): Aabb | null {
+  const place = openingPlacement(wall, offset, width, room);
+  if (!place) return null;
+  return extrudedAabb(place, depth, place.into);
+}
+
+/** How far inside the room a tall item counts as covering a window. */
+export const WINDOW_NOTE_DEPTH_M = 0.6;
+
+export function entranceSectors(fixture: EntranceFixture, room: Pick<Room, "width" | "depth">): Sector[] {
+  if (fixture.door !== "single") return [];
+  const place = openingPlacement(fixture.wall, fixture.offset, fixture.width, room);
+  if (!place) return [];
+  // Along the wall frame, the far end is the viewer's left when facing the wall from inside.
+  const left = place.end;
+  const right = place.start;
+  const dx = right.x - left.x;
+  const dz = right.z - left.z;
+  const span = Math.hypot(dx, dz);
+  if (span < 1e-8) return [];
+  const closed = { x: dx / span, z: dz / span };
+  const reversed = { x: -closed.x, z: -closed.z };
+  if (fixture.hinge === "right") {
+    return [{ hinge: right, closed: reversed, into: place.into, radius: span }];
+  }
+  return [{ hinge: left, closed, into: place.into, radius: span }];
+}
+
+export interface WallSolid {
+  cx: number;
+  cy: number;
+  cz: number;
+  sx: number;
+  sy: number;
+  sz: number;
+}
+
+/** Wall volumes with window and entrance holes removed. Thickness sits outside the interior. */
+export function wallSolids(room: Pick<Room, "width" | "depth" | "ceilingHeight" | "fixtures">, thickness = 0.08): WallSolid[] {
+  const walls: PlanWall[] = ["front", "right", "back", "left"];
+  const solids: WallSolid[] = [];
+  for (const wall of walls) {
+    const frame = wallFrame(wall, room);
+    const holes = (room.fixtures ?? []).flatMap((fixture) => {
+      if (fixture.type === "window" && fixture.wall === wall) {
+        return [{ t0: fixture.offset, t1: fixture.offset + fixture.width, y0: fixture.sillHeight, y1: fixture.sillHeight + fixture.height }];
+      }
+      if (fixture.type === "entrance" && fixture.wall === wall) {
+        return [{ t0: fixture.offset, t1: fixture.offset + fixture.width, y0: 0, y1: fixture.height }];
+      }
+      return [];
+    });
+    for (const piece of subtractHoles(frame.length, room.ceilingHeight, holes)) {
+      const midT = (piece.t0 + piece.t1) / 2;
+      const outward = { x: -frame.into.x, z: -frame.into.z };
+      const cx = frame.origin.x + frame.along.x * midT + outward.x * (thickness / 2);
+      const cz = frame.origin.z + frame.along.z * midT + outward.z * (thickness / 2);
+      const alongLen = piece.t1 - piece.t0;
+      const horizontal = wall === "front" || wall === "back";
+      solids.push({
+        cx,
+        cy: (piece.y0 + piece.y1) / 2,
+        cz,
+        sx: horizontal ? alongLen : thickness,
+        sy: piece.y1 - piece.y0,
+        sz: horizontal ? thickness : alongLen,
+      });
+    }
+  }
+  return solids.filter((solid) => solid.sx > 1e-4 && solid.sy > 1e-4 && solid.sz > 1e-4);
+}
+
+function subtractHoles(
+  length: number,
+  ceiling: number,
+  holes: { t0: number; t1: number; y0: number; y1: number }[],
+): { t0: number; t1: number; y0: number; y1: number }[] {
+  const clipped = holes
+    .map((hole) => ({
+      t0: Math.max(0, Math.min(length, hole.t0)),
+      t1: Math.max(0, Math.min(length, hole.t1)),
+      y0: Math.max(0, Math.min(ceiling, hole.y0)),
+      y1: Math.max(0, Math.min(ceiling, hole.y1)),
+    }))
+    .filter((hole) => hole.t1 - hole.t0 > 1e-4 && hole.y1 - hole.y0 > 1e-4);
+  const marks = [0, length];
+  for (const hole of clipped) marks.push(hole.t0, hole.t1);
+  const unique = [...new Set(marks.map((value) => Math.round(value * 10000) / 10000))].sort((a, b) => a - b);
+  const pieces: { t0: number; t1: number; y0: number; y1: number }[] = [];
+  for (let i = 0; i < unique.length - 1; i++) {
+    const t0 = unique[i];
+    const t1 = unique[i + 1];
+    if (t1 - t0 < 1e-4) continue;
+    const mid = (t0 + t1) / 2;
+    const covering = clipped.filter((hole) => mid > hole.t0 && mid < hole.t1).sort((a, b) => a.y0 - b.y0);
+    let cursor = 0;
+    for (const hole of covering) {
+      if (hole.y0 - cursor > 1e-4) pieces.push({ t0, t1, y0: cursor, y1: hole.y0 });
+      cursor = Math.max(cursor, hole.y1);
+    }
+    if (ceiling - cursor > 1e-4) pieces.push({ t0, t1, y0: cursor, y1: ceiling });
+  }
+  return pieces;
 }
 
 export function anchorLabel(anchor: PillarFixture["anchor"]): string {
@@ -270,8 +438,31 @@ function insideRoom(box: Aabb, room: Pick<Room, "width" | "depth">, eps = 0.001)
 /** Japanese error for a fixture that cannot be stored, or null when it is usable. */
 export function fixtureError(fixture: RoomFixture, room: Pick<Room, "width" | "depth" | "ceilingHeight">): string | null {
   if (fixture.type === "beam") return beamError(fixture, room);
+  if (fixture.type === "window") return windowError(fixture, room);
+  if (fixture.type === "entrance") return entranceError(fixture, room);
   if (fixture.type === "pillar") return boxError("柱", fixture, room, null);
   return boxError("備え付け収納", fixture, room, fixture.height);
+}
+
+function fitsOnWall(name: string, wall: PlanWall, offset: number, width: number, room: Pick<Room, "width" | "depth">): string | null {
+  const frame = wallFrame(wall, room);
+  if (offset < -1e-6) return `${name}の位置が壁の始点より手前です。`;
+  if (offset + width > frame.length + 0.001) return `${name}が壁の長さを超えています。`;
+  return null;
+}
+
+function windowError(fixture: WindowFixture, room: Pick<Room, "width" | "depth" | "ceilingHeight">): string | null {
+  if (!(fixture.width > 0) || !(fixture.height > 0)) return "窓の幅と高さは正の数である必要があります。";
+  if (fixture.sillHeight < 0 || fixture.recess < 0) return "窓の下端と出幅は 0 以上である必要があります。";
+  if (fixture.sillHeight + fixture.height > room.ceilingHeight + 0.001) return "窓が天井を超えています。";
+  return fitsOnWall("窓", fixture.wall, fixture.offset, fixture.width, room);
+}
+
+function entranceError(fixture: EntranceFixture, room: Pick<Room, "width" | "depth" | "ceilingHeight">): string | null {
+  if (!(fixture.width > 0) || !(fixture.height > 0)) return "入口の幅と高さは正の数である必要があります。";
+  if (fixture.clearance < 0) return "入口前の空きは 0 以上である必要があります。";
+  if (fixture.height > room.ceilingHeight + 0.001) return "入口の高さが天井を超えています。";
+  return fitsOnWall("入口", fixture.wall, fixture.offset, fixture.width, room);
 }
 
 function boxError(

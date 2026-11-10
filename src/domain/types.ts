@@ -1,11 +1,11 @@
 /**
- * Project file schema v2.
+ * Project file schema v3.
  * Internal lengths are meters. Every length in the UI is centimeters (0.1 cm).
- * Version 1 files migrate on load (fixtures default to [], elevation to 0).
+ * Versions 1 and 2 migrate on load (fixtures, elevation, allowOverlapIds).
  * See AGENTS.md for the coordinate system and rotation convention.
  */
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 3;
 
 export interface Vec2 {
   /** Meters, room X (width axis). */
@@ -108,7 +108,42 @@ export interface BeamFixture extends FixtureBase {
   drop: number;
 }
 
-export type RoomFixture = PillarFixture | StorageFixture | BeamFixture;
+export type WindowStyle = "sliding" | "other";
+export type EntranceDoor = "none" | "single" | "sliding";
+
+/** Opening in a wall, with an optional recess outside the room outline. */
+export interface WindowFixture extends FixtureBase {
+  type: "window";
+  wall: PlanWall;
+  /** Meters from the wall start (same convention as other wall fixtures). */
+  offset: number;
+  /** Meters along the wall. */
+  width: number;
+  /** Meters from the floor to the bottom of the glass. */
+  sillHeight: number;
+  /** Meters, the glass height. */
+  height: number;
+  /** Meters the bay sticks outward past the wall. 0 is flush. */
+  recess: number;
+  style: WindowStyle;
+}
+
+/** Doorway in a wall. No hallway is stored or drawn. */
+export interface EntranceFixture extends FixtureBase {
+  type: "entrance";
+  wall: PlanWall;
+  offset: number;
+  width: number;
+  /** Meters. Often the ceiling height. */
+  height: number;
+  door: EntranceDoor;
+  /** Used when door is "single". */
+  hinge: HingeSide;
+  /** Meters of clear floor in front of the opening, into the room. */
+  clearance: number;
+}
+
+export type RoomFixture = PillarFixture | StorageFixture | BeamFixture | WindowFixture | EntranceFixture;
 
 /** Box uses width x depth. Cylinder uses width as the diameter; depth must equal width. */
 export type FurnitureShape = "box" | "cylinder";
@@ -138,6 +173,11 @@ export interface Furniture {
    * so the item sits on the floor. Set this to place something on storage.
    */
   elevation?: number;
+  /**
+   * Other furniture ids this item may overlap. The pair is allowed if
+   * either item lists the other. Omitted means none.
+   */
+  allowOverlapIds?: string[];
 }
 
 /** One arrangement of furniture in the room. Comparison UI is not built yet. */

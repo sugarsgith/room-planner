@@ -22,8 +22,10 @@ export const LIMITS = {
 
 const KNOWN_SHAPES = new Set(["box", "cylinder"]);
 const KNOWN_OPENINGS = new Set(["door", "window"]);
-const KNOWN_FIXTURES = new Set(["pillar", "storage", "beam"]);
+const KNOWN_FIXTURES = new Set(["pillar", "storage", "beam", "window", "entrance"]);
 const KNOWN_DOORS = new Set(["none", "single", "double", "sliding"]);
+const KNOWN_WINDOW_STYLES = new Set(["sliding", "other"]);
+const KNOWN_ENTRANCE_DOORS = new Set(["none", "single", "sliding"]);
 const KNOWN_HINGES = new Set(["left", "right"]);
 const BBOX_EPS = 0.001;
 
@@ -43,13 +45,13 @@ export function validateProject(data: unknown): ValidateResult {
   if (!isRecord(data)) {
     return { ok: false, error: "データのルートはオブジェクトである必要があります。" };
   }
-  if (data.schemaVersion !== 1 && data.schemaVersion !== SCHEMA_VERSION) {
+  if (data.schemaVersion !== 1 && data.schemaVersion !== 2 && data.schemaVersion !== SCHEMA_VERSION) {
     return {
       ok: false,
-      error: `schemaVersion は 1 または ${SCHEMA_VERSION} である必要があります（受信: ${preview(data.schemaVersion)}）。このバージョンのアプリでは読み込めません。`,
+      error: `schemaVersion は 1、2 または ${SCHEMA_VERSION} である必要があります（受信: ${preview(data.schemaVersion)}）。このバージョンのアプリでは読み込めません。`,
     };
   }
-  const migrated = data.schemaVersion === 1 ? migrateV1(data) : data;
+  const migrated = data.schemaVersion === SCHEMA_VERSION ? data : migrateToCurrent(data);
   if (migrated.app !== undefined && migrated.app !== "room-planner") {
     return { ok: false, error: "app は \"room-planner\" である必要があります。" };
   }
@@ -78,7 +80,7 @@ export function validateProject(data: unknown): ValidateResult {
   return { ok: true, project: migrated as unknown as Project };
 }
 
-function migrateV1(data: Record<string, unknown>): Record<string, unknown> {
+function migrateToCurrent(data: Record<string, unknown>): Record<string, unknown> {
   const copy = structuredClone(data);
   copy.schemaVersion = SCHEMA_VERSION;
   if (isRecord(copy.room) && !Array.isArray(copy.room.fixtures)) copy.room.fixtures = [];
@@ -86,7 +88,9 @@ function migrateV1(data: Record<string, unknown>): Record<string, unknown> {
     for (const layout of copy.layouts) {
       if (!isRecord(layout) || !Array.isArray(layout.furniture)) continue;
       for (const item of layout.furniture) {
-        if (isRecord(item) && item.elevation === undefined) item.elevation = 0;
+        if (!isRecord(item)) continue;
+        if (item.elevation === undefined) item.elevation = 0;
+        if (item.allowOverlapIds === undefined) item.allowOverlapIds = [];
       }
     }
   }
@@ -194,13 +198,32 @@ function validateLayout(value: unknown, index: number): string | null {
   if (nameError) return nameError;
   if (!Array.isArray(value.furniture)) return `${label}.furniture は配列である必要があります。`;
   if (value.furniture.length > 200) return `${label} の家具が多すぎます（上限 200）。`;
-  const ids = new Set<string>();
+    const ids = new Set<string>();
   for (let i = 0; i < value.furniture.length; i++) {
     const err = validateFurniture(value.furniture[i], `${label}.furniture[${i}]`);
     if (err) return err;
     const id = (value.furniture[i] as Furniture).id;
     if (ids.has(id)) return `家具 id「${id}」が同じレイアウト内で重複しています。`;
     ids.add(id);
+  }
+  for (let i = 0; i < value.furniture.length; i++) {
+    const item = value.furniture[i] as Furniture;
+    const err = validateAllowList(item, ids, `${label}.furniture[${i}]`);
+    if (err) return err;
+  }
+  return null;
+}
+
+function validateAllowList(item: Furniture, ids: Set<string>, label: string): string | null {
+  if (item.allowOverlapIds === undefined) return null;
+  if (!Array.isArray(item.allowOverlapIds)) return `${label} の重なってもいい家具は id の配列である必要があります。`;
+  const seen = new Set<string>();
+  for (const id of item.allowOverlapIds) {
+    if (typeof id !== "string" || !ids.has(id) || id === item.id) {
+      return `${label} の重なってもいい家具に、同じレイアウトの他の家具ではない id があります。`;
+    }
+    if (seen.has(id)) return `${label} の重なってもいい家具が重複しています。`;
+    seen.add(id);
   }
   return null;
 }
@@ -250,9 +273,40 @@ function validateFixture(value: unknown, index: number, room: Record<string, unk
   const idError = checkId(value.id, `${label}.id`);
   if (idError) return idError;
   if (typeof value.type !== "string" || !KNOWN_FIXTURES.has(value.type)) {
-    return `${label} の種類「${preview(value.type)}」は未対応です。pillar、storage、beam のいずれかを指定してください。`;
+    return `${label} の種類「${preview(value.type)}」は未対応です。`;
   }
-  if (value.type === "beam") {
+  if (value.type === "window") {
+    if (!isPlanWall(value.wall)) return `${label} の壁は 上 / 右 / 下 / 左 のいずれかです。`;
+    const offsetError = checkNonNegative(value.offset, `${label} の始点からの距離`);
+    if (offsetError) return offsetError;
+    const width = checkPositive(value.width, LIMITS.fixture, `${label} の幅`);
+    if (width) return width;
+    const sill = checkNonNegative(value.sillHeight, `${label} の下端の高さ`);
+    if (sill) return sill;
+    const height = checkPositive(value.height, LIMITS.fixture, `${label} の窓の高さ`);
+    if (height) return height;
+    const recess = checkNonNegative(value.recess, `${label} の出幅`);
+    if (recess) return recess;
+    if (typeof value.style !== "string" || !KNOWN_WINDOW_STYLES.has(value.style)) {
+      return `${label} の種類は 引き違い または その他 です。`;
+    }
+  } else if (value.type === "entrance") {
+    if (!isPlanWall(value.wall)) return `${label} の壁は 上 / 右 / 下 / 左 のいずれかです。`;
+    const offsetError = checkNonNegative(value.offset, `${label} の始点からの距離`);
+    if (offsetError) return offsetError;
+    const width = checkPositive(value.width, LIMITS.fixture, `${label} の幅`);
+    if (width) return width;
+    const height = checkPositive(value.height, LIMITS.fixture, `${label} の高さ`);
+    if (height) return height;
+    const clearance = checkNonNegative(value.clearance, `${label} の入口前の空き`);
+    if (clearance) return clearance;
+    if (typeof value.door !== "string" || !KNOWN_ENTRANCE_DOORS.has(value.door)) {
+      return `${label} の扉は なし / 片開き / 引き戸 のいずれかです。`;
+    }
+    if (value.hinge !== undefined && (typeof value.hinge !== "string" || !KNOWN_HINGES.has(value.hinge))) {
+      return `${label} の吊元は 左 または 右 です。`;
+    }
+  } else if (value.type === "beam") {
     if (!Array.isArray(value.walls) || value.walls.some((wall) => !isPlanWall(wall))) {
       return `${label} の壁は 上・右・下・左 から選んでください。`;
     }
@@ -305,6 +359,12 @@ function validateAnchor(value: unknown, label: string): string | null {
     return null;
   }
   return `${label} の位置種別が不正です。`;
+}
+
+function checkNonNegative(value: unknown, label: string): string | null {
+  if (typeof value === "number" && Number.isNaN(value)) return `${label}が NaN です。`;
+  if (!isFiniteNumber(value) || value < 0 || value > 20) return `${label}は 0〜${mToCm(20)}cm の範囲で指定してください。`;
+  return null;
 }
 
 function checkPositive(

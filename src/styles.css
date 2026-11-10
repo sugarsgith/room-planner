@@ -164,15 +164,18 @@ button.danger { color: var(--danger); border-color: #e3b2aa; }
 .check { grid-template-columns: 20px 1fr; }
 .hint { font-size: 12px; line-height: 1.45; margin: 6px 0; }
 .rotation-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 8px 0; font-size: 13px; }
-.warn {
+.warn, .info {
   margin: 8px 0;
   padding: 8px;
-  background: var(--warn-bg);
-  color: var(--danger);
   border-radius: 6px;
   font-size: 13px;
   line-height: 1.4;
 }
+.warn { background: var(--warn-bg); color: var(--danger); }
+.info { background: #e7eef6; color: #245074; }
+.allow-list { border: 0; margin: 8px 0; padding: 0; }
+.allow-list legend { font-size: 13px; margin-bottom: 4px; }
+.furniture.allow-overlap { opacity: 0.55; }
 .stage { position: relative; min-width: 0; min-height: 0; background: var(--stage); }
 .viewport { position: absolute; inset: 0; touch-action: none; }
 .viewport canvas, .plan { width: 100%; height: 100%; display: block; }
@@ -195,6 +198,10 @@ button.danger { color: var(--danger); border-color: #e3b2aa; }
 .fixture-hatch { fill: url(#fixture-hatch); stroke: none; }
 .fixture-beam { fill: none; stroke: #5e584f; }
 .swing { fill: none; stroke: #8a5a12; pointer-events: none; }
+.window-recess { fill: #d5e4ef; stroke: #3d6d8c; }
+.window-pane { fill: #f7fbfe; stroke: #245074; }
+.entrance-gap { fill: #d5cfc3; stroke: none; }
+.entrance-label { fill: #245074; font-family: var(--font); }
 .fixture-row { display: flex; justify-content: space-between; gap: 6px; align-items: center; margin: 4px 0; font-size: 13px; }
 .draft { margin-top: 8px; padding-top: 8px; border-top: 1px dashed var(--line); }
 .choice { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0; }

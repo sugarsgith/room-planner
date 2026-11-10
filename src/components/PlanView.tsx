@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
-import { arcPoints, beamFootprints, obstacleFootprint, storageSectors } from "../domain/fixtures";
-import { analyzeLayout, footprintCorners, issueIsActive, rotateLocal } from "../domain/geometry";
+import { arcPoints, beamFootprints, entranceSectors, obstacleFootprint, openingPlacement, storageSectors, windowRecess } from "../domain/fixtures";
+import { analyzeLayout, drawsAsAllowedOverlap, footprintCorners, issueIsActive, rotateLocal } from "../domain/geometry";
 import { activeFurniture } from "../domain/schema";
 import { formatCm, normalizeDegrees } from "../domain/units";
 import { useEditor } from "../state/store";
@@ -305,6 +305,7 @@ export function PlanView() {
                 />
               ));
             }
+            if (fixture.type === "window" || fixture.type === "entrance") return null;
             const box = obstacleFootprint(fixture, room);
             if (!box) return null;
             return (
@@ -328,12 +329,17 @@ export function PlanView() {
             );
           })}
           <path d={outline} className="room-edge" strokeWidth={2 / ppm} />
-          {furniture.map((item) => {
+          <OpeningGraphics room={room} ppm={ppm} />
+          {[...furniture]
+            .sort((a, b) => Number(drawsAsAllowedOverlap(a, furniture)) - Number(drawsAsAllowedOverlap(b, furniture)))
+            .map((item) => {
             const issue = issueById.get(item.id);
             const warn = Boolean(issue && issueIsActive(issue));
             const selected = item.id === selectedId;
-            const className = warn ? "furniture warn" : selected ? "furniture selected" : "furniture";
+            const allowed = drawsAsAllowedOverlap(item, furniture);
+            const className = `${warn ? "furniture warn" : selected ? "furniture selected" : "furniture"}${allowed ? " allow-overlap" : ""}`;
             const strokeWidth = (warn || selected ? 2.6 : 1.4) / ppm;
+            const dash = allowed ? `${0.05} ${0.035}` : undefined;
             return (
               <g key={item.id} className={className}>
                 {item.shape === "cylinder" ? (
@@ -343,6 +349,7 @@ export function PlanView() {
                     r={item.width / 2}
                     fill={item.color}
                     strokeWidth={strokeWidth}
+                    strokeDasharray={dash}
                     onPointerDown={(event) => onItemDown(event, item.id, "move")}
                   />
                 ) : (
@@ -353,6 +360,7 @@ export function PlanView() {
                     fill={item.color}
                     strokeWidth={strokeWidth}
                     strokeLinejoin="round"
+                    strokeDasharray={dash}
                     onPointerDown={(event) => onItemDown(event, item.id, "move")}
                   />
                 )}
@@ -402,6 +410,23 @@ export function PlanView() {
             })}
         </g>
         <g className="labels" style={{ pointerEvents: "none" }}>
+          {room.fixtures.map((fixture) => {
+            if (fixture.type !== "entrance") return null;
+            const place = openingPlacement(fixture.wall, fixture.offset, fixture.width, room);
+            if (!place) return null;
+            const at = screenPoint(
+              (place.start.x + place.end.x) / 2 + place.into.x * 0.22,
+              (place.start.z + place.end.z) / 2 + place.into.z * 0.22,
+              offsetX,
+              offsetY,
+              ppm,
+            );
+            return (
+              <text key={`entrance-${fixture.id}`} x={at.x} y={at.y} textAnchor="middle" fontSize={12} fill="#245074">
+                入口
+              </text>
+            );
+          })}
           {furniture.map((item) => {
             const at = screenPoint(item.x, item.z, offsetX, offsetY, ppm);
             return (
@@ -436,6 +461,67 @@ export function PlanView() {
         </g>
       </svg>
     </div>
+  );
+}
+
+function OpeningGraphics({ room, ppm }: { room: { width: number; depth: number; fixtures: import("../domain/types").Room["fixtures"] }; ppm: number }) {
+  return (
+    <>
+      {room.fixtures.map((fixture) => {
+        if (fixture.type === "window") {
+          const place = openingPlacement(fixture.wall, fixture.offset, fixture.width, room);
+          const recess = windowRecess(fixture, room);
+          if (!place) return null;
+          const dx = place.end.x - place.start.x;
+          const dz = place.end.z - place.start.z;
+          const len = Math.hypot(dx, dz) || 1;
+          const along = { x: dx / len, z: dz / len };
+          const mid = { x: (place.start.x + place.end.x) / 2, z: (place.start.z + place.end.z) / 2 };
+          const pane = (shift: number, lift: number) => {
+            const center = {
+              x: mid.x + along.x * shift + place.outward.x * lift,
+              z: mid.z + along.z * shift + place.outward.z * lift,
+            };
+            const half = fixture.width * 0.28;
+            const thick = 0.03;
+            const a = { x: center.x - along.x * half + place.outward.x * thick, z: center.z - along.z * half + place.outward.z * thick };
+            const b = { x: center.x + along.x * half + place.outward.x * thick, z: center.z + along.z * half + place.outward.z * thick };
+            const c = { x: center.x + along.x * half - place.outward.x * thick, z: center.z + along.z * half - place.outward.z * thick };
+            const d = { x: center.x - along.x * half - place.outward.x * thick, z: center.z - along.z * half - place.outward.z * thick };
+            return [a, b, c, d];
+          };
+          const panes = fixture.style === "sliding" ? [pane(-fixture.width * 0.12, 0.02), pane(fixture.width * 0.12, -0.02)] : [pane(0, 0)];
+          return (
+            <g key={fixture.id} data-fixture-type="window" data-testid="fixture-window" className="fixture">
+              {recess && (
+                <rect className="window-recess" x={recess.minX} y={-recess.maxZ} width={recess.maxX - recess.minX} height={recess.maxZ - recess.minZ} strokeWidth={1.2 / ppm} />
+              )}
+              {panes.map((corners, index) => (
+                <polygon key={index} className="window-pane" points={corners.map((point) => `${point.x},${-point.z}`).join(" ")} strokeWidth={1.2 / ppm} />
+              ))}
+            </g>
+          );
+        }
+        if (fixture.type !== "entrance") return null;
+        const place = openingPlacement(fixture.wall, fixture.offset, fixture.width, room);
+        if (!place) return null;
+        return (
+          <g key={fixture.id} data-fixture-type="entrance" data-testid="fixture-entrance" className="fixture">
+            <polygon
+              className="entrance-gap"
+              points={[place.start, place.end, { x: place.end.x + place.into.x * 0.08, z: place.end.z + place.into.z * 0.08 }, { x: place.start.x + place.into.x * 0.08, z: place.start.z + place.into.z * 0.08 }]
+                .map((point) => `${point.x},${-point.z}`)
+                .join(" ")}
+            />
+            {entranceSectors(fixture, room).map((sector, index) => {
+              const points = arcPoints(sector);
+              const line = points.map((point, pointIndex) => `${pointIndex === 0 ? "M" : "L"}${point.x} ${-point.z}`).join(" ");
+              return <path key={index} className="swing" d={`${line} L${sector.hinge.x} ${-sector.hinge.z} Z`} strokeWidth={1.4 / ppm} />;
+            })}
+          </g>
+        );
+      })}
+    </>
   );
 }
 

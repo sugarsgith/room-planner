@@ -2,8 +2,8 @@ import { OrbitControls } from "@react-three/drei";
 import { Canvas, useThree } from "@react-three/fiber";
 import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import * as THREE from "three";
-import { beamFootprints, obstacleFootprint, storageSectors } from "../domain/fixtures";
-import { analyzeLayout, issueIsActive, wallSegments } from "../domain/geometry";
+import { beamFootprints, entranceSectors, obstacleFootprint, openingPlacement, storageSectors, wallSolids, windowRecess } from "../domain/fixtures";
+import { analyzeLayout, issueIsActive } from "../domain/geometry";
 import { activeFurniture } from "../domain/schema";
 import { roundM } from "../domain/units";
 import type { Furniture, Room } from "../domain/types";
@@ -32,7 +32,7 @@ function Scene() {
   const wallsTransparent = useEditor((s) => s.wallsTransparent);
   const orbitEnabled = useEditor((s) => s.orbitEnabled);
   const issues = useMemo(() => new Map(analyzeLayout(room, furniture).map((issue) => [issue.id, issue])), [room, furniture]);
-  const walls = useMemo(() => wallSegments(room.outline, 0.08), [room.outline]);
+  const walls = useMemo(() => wallSolids(room, 0.08), [room]);
 
   return (
     <>
@@ -46,11 +46,10 @@ function Scene() {
         walls.map((wall, index) => (
           <mesh
             key={index}
-            position={[wall.cx, room.ceilingHeight / 2, wall.cz]}
-            rotation={[0, wall.angle, 0]}
+            position={[wall.cx, wall.cy, wall.cz]}
             raycast={() => undefined}
           >
-            <boxGeometry args={[wall.length, room.ceilingHeight, wall.thickness]} />
+            <boxGeometry args={[wall.sx, wall.sy, wall.sz]} />
             <meshStandardMaterial
               color="#f4f1ea"
               transparent={wallsTransparent}
@@ -101,6 +100,8 @@ function FixtureMeshes() {
   return (
     <>
       {room.fixtures.map((fixture) => {
+        if (fixture.type === "window") return <WindowMesh key={fixture.id} fixture={fixture} room={room} />;
+        if (fixture.type === "entrance") return <EntranceSwing key={fixture.id} fixture={fixture} room={room} />;
         if (fixture.type === "beam") {
           return beamFootprints(fixture, room).map((box, index) => (
             <mesh
@@ -136,6 +137,53 @@ function FixtureMeshes() {
           </group>
         );
       })}
+    </>
+  );
+}
+
+function WindowMesh({ fixture, room }: { fixture: Extract<Room["fixtures"][number], { type: "window" }>; room: Room }) {
+  const place = openingPlacement(fixture.wall, fixture.offset, fixture.width, room);
+  const recess = windowRecess(fixture, room);
+  if (!place) return null;
+  const mid = { x: (place.start.x + place.end.x) / 2, z: (place.start.z + place.end.z) / 2 };
+  const horizontal = fixture.wall === "front" || fixture.wall === "back";
+  const alongSign = horizontal ? Math.sign(place.end.x - place.start.x) || 1 : Math.sign(place.end.z - place.start.z) || 1;
+  const panes = fixture.style === "sliding" ? [-fixture.width * 0.12, fixture.width * 0.12] : [0];
+  return (
+    <group>
+      {panes.map((delta, index) => (
+        <mesh
+          key={index}
+          position={[
+            mid.x + (horizontal ? delta * alongSign : place.outward.x * (index === 0 ? 0.015 : -0.015)),
+            fixture.sillHeight + fixture.height / 2,
+            mid.z + (horizontal ? place.outward.z * (index === 0 ? 0.015 : -0.015) : delta * alongSign),
+          ]}
+          raycast={() => undefined}
+        >
+          <boxGeometry args={[horizontal ? fixture.width * 0.46 : 0.02, fixture.height * 0.96, horizontal ? 0.02 : fixture.width * 0.46]} />
+          <meshStandardMaterial color="#8ebbd4" transparent opacity={0.55} />
+        </mesh>
+      ))}
+      {recess && (
+        <mesh
+          position={[(recess.minX + recess.maxX) / 2, Math.max(0.02, fixture.sillHeight - 0.02), (recess.minZ + recess.maxZ) / 2]}
+          raycast={() => undefined}
+        >
+          <boxGeometry args={[Math.max(0.02, recess.maxX - recess.minX), 0.04, Math.max(0.02, recess.maxZ - recess.minZ)]} />
+          <meshStandardMaterial color="#d9c7ae" />
+        </mesh>
+      )}
+    </group>
+  );
+}
+
+function EntranceSwing({ fixture, room }: { fixture: Extract<Room["fixtures"][number], { type: "entrance" }>; room: Room }) {
+  return (
+    <>
+      {entranceSectors(fixture, room).map((sector, index) => (
+        <SwingMesh key={`${fixture.id}-${index}`} sector={sector} />
+      ))}
     </>
   );
 }
@@ -204,7 +252,7 @@ function FurnitureMesh({ item, selected, warned }: { item: Furniture; selected: 
   }, [item.shape, item.width, item.height, item.depth]);
   useEffect(() => () => geometry.dispose(), [geometry]);
   return (
-    <group userData={{ furnitureId: item.id }} position={[item.x, item.height / 2, item.z]} rotation={[0, rotationY, 0]}>
+    <group userData={{ furnitureId: item.id }} position={[item.x, (item.elevation ?? 0) + item.height / 2, item.z]} rotation={[0, rotationY, 0]}>
       <mesh geometry={geometry}>
         <meshStandardMaterial
           color={item.color}

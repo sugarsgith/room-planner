@@ -125,3 +125,56 @@ test("fixtures, save status, swing warning, and 3D", async ({ page }) => {
   await expect(page.locator("[data-fixture-type=pillar]")).toBeVisible();
   await page.screenshot({ path: `${outDir}/room-fixtures-2d-ipad.png` });
 });
+
+test("window, entrance, and allowed overlap", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("./");
+
+  await page.getByTestId("fixture-add-window").click();
+  await expect(page.getByTestId("fixture-opening-offset")).toBeVisible();
+  await expect(page.locator("label").filter({ has: page.getByTestId("fixture-opening-offset") })).toContainText("右端から");
+  await page.getByTestId("fixture-opening-offset").fill("52.5");
+  await page.getByTestId("fixture-opening-width").fill("165");
+  await page.getByTestId("fixture-window-sill").fill("90");
+  await page.getByTestId("fixture-window-height").fill("110");
+  await page.getByTestId("fixture-window-recess").fill("30");
+  await page.getByTestId("fixture-commit").click();
+  await expect(page.getByTestId("fixture-window")).toBeVisible();
+
+  await page.getByRole("button", { name: "窓（上）" }).click();
+  await expect(page.getByTestId("edit-window-style")).toHaveValue("sliding");
+  await expect(page.getByTestId("edit-window-width")).toHaveValue("165.0");
+  await page.getByTestId("edit-window-style").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${outDir}/room-window-edit-1440.png` });
+
+  await page.getByTestId("fixture-add-entrance").click();
+  await page.getByTestId("fixture-opening-offset").fill("95");
+  await page.getByTestId("fixture-opening-width").fill("80");
+  await page.getByTestId("fixture-commit").click();
+  await expect(page.getByTestId("fixture-entrance")).toBeVisible();
+
+  await page.getByRole("button", { name: "箱を追加" }).click();
+  await expect(page.getByTestId("item-name")).toHaveValue("新しい家具");
+  await page.getByTestId("item-name").fill("チェア");
+  await page.getByTestId("item-name").press("Enter");
+  await page.getByTestId("dim-width").fill("55");
+  await page.getByTestId("dim-width").press("Enter");
+  await page.getByTestId("dim-depth").fill("55");
+  await page.getByTestId("dim-depth").press("Enter");
+  await page.getByTestId("dim-height").fill("90");
+  await page.getByTestId("dim-height").press("Enter");
+  await page.getByTestId("pos-x").fill("70");
+  await page.getByTestId("pos-x").press("Enter");
+  await page.getByTestId("pos-z").fill("90");
+  await page.getByTestId("pos-z").press("Enter");
+  await page.getByTestId("allow-desk").check();
+  await expect(page.getByTestId("overlap-warning")).toHaveCount(0);
+  await page.getByTestId("allow-overlap").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${outDir}/room-allow-overlap-1440.png` });
+
+  await page.getByTestId("view-mode-2d").click();
+  await page.screenshot({ path: `${outDir}/room-window-entrance-2d-1440.png` });
+  await page.getByTestId("view-mode-3d").click();
+  await page.waitForTimeout(800);
+  await page.screenshot({ path: `${outDir}/room-window-entrance-3d-1440.png` });
+});
