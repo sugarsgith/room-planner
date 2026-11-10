@@ -8,6 +8,7 @@ import { analyzeLayout, issueIsActive } from "./domain/geometry";
 import { activeFurniture } from "./domain/schema";
 import { cmToM, formatCm } from "./domain/units";
 import { downloadText } from "./lib/download";
+import { useUpdatePrompt } from "./pwa/useUpdatePrompt";
 import { useEditor } from "./state/store";
 
 export function App() {
@@ -34,6 +35,7 @@ export function App() {
   return (
     <div className="app">
       <Toolbar />
+      <UpdateNotice />
       {loadStatus === "corrupt" && (
         <div className="banner" role="alert" data-testid="corrupt-banner">
           <p>
@@ -103,6 +105,19 @@ export function App() {
         <span>{problemCount > 0 ? `重なり・はみ出し ${problemCount} 件` : "重なりなし"}</span>
         <span className="status-help">矢印キーで 1cm（Shift で 10cm）。ドラッグは 1 回の操作として戻せます。</span>
       </footer>
+    </div>
+  );
+}
+
+function UpdateNotice() {
+  const { visible, applyUpdate } = useUpdatePrompt();
+  if (!visible) return null;
+  return (
+    <div className="update-banner" role="status" data-testid="update-banner">
+      <p>新しい版があります</p>
+      <button type="button" data-testid="update-apply" onClick={() => void applyUpdate()}>
+        更新
+      </button>
     </div>
   );
 }

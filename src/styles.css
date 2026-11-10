@@ -51,6 +51,45 @@ button.danger { color: var(--danger); border-color: #e3b2aa; }
   flex-direction: column;
   min-width: 0;
 }
+@media (display-mode: standalone) {
+  html { background: var(--panel); }
+  .app {
+    box-sizing: border-box;
+    padding-top: env(safe-area-inset-top);
+    padding-right: env(safe-area-inset-right);
+    padding-bottom: env(safe-area-inset-bottom);
+    padding-left: env(safe-area-inset-left);
+    background: var(--panel);
+  }
+}
+html.standalone { background: var(--panel); }
+html.standalone .app {
+  box-sizing: border-box;
+  padding-top: env(safe-area-inset-top);
+  padding-right: env(safe-area-inset-right);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  background: var(--panel);
+}
+.update-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 6px 12px;
+  background: #e7efe4;
+  color: #1f4d3a;
+  border-bottom: 1px solid #c5d4c4;
+  font-size: 13px;
+}
+.update-banner p { margin: 0; }
+.update-banner button {
+  background: #1f4d3a;
+  color: #f4f0e8;
+  border-color: #1f4d3a;
+  flex: none;
+}
 .toolbar {
   display: flex;
   flex-wrap: wrap;
