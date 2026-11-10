@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { activeFurniture } from "../domain/schema";
 import { BACKUP_KEY, STORAGE_KEY, type KeyValueStorage } from "../domain/storage";
 import { cmToM, mToCm } from "../domain/units";
+import type { StorageFixture } from "../domain/types";
 import { initEditor, saveStatusLabel, useEditor } from "./store";
 
 function memory(initial: Record<string, string> = {}) {
@@ -144,6 +145,28 @@ describe("editor store", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it("changes a storage door after it is added, and undo restores it", () => {
+    useEditor.getState().addFixture({
+      id: "cupboard",
+      type: "storage",
+      anchor: { kind: "corner", corner: "front-left" },
+      width: cmToM(90),
+      depth: cmToM(45),
+      height: cmToM(180),
+      door: "none",
+      hinge: "left",
+    });
+    const stored = () =>
+      useEditor.getState().project.room.fixtures.find((item) => item.id === "cupboard") as StorageFixture;
+    expect(stored().door).toBe("none");
+    useEditor.getState().replaceFixture({ ...stored(), door: "single", hinge: "right" });
+    expect(stored()).toMatchObject({ door: "single", hinge: "right" });
+    useEditor.getState().undo();
+    expect(stored()).toMatchObject({ door: "none", hinge: "left" });
+    useEditor.getState().redo();
+    expect(stored()).toMatchObject({ door: "single", hinge: "right" });
   });
 
   it("shows a clear failure and does not write again after localStorage rejects the save", () => {

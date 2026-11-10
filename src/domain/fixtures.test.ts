@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { obstacleFootprint, storageSectors } from "./fixtures";
 import { analyzeLayout, rectangleOutline } from "./geometry";
 import type { Furniture, Room, StorageFixture } from "./types";
-import { mmToM } from "./units";
+import { cmToM } from "./units";
 
 function room(): Room {
   return {
@@ -40,8 +40,8 @@ describe("fixture geometry", () => {
         id: "p",
         type: "pillar",
         anchor: { kind: "corner", corner: "back-left" },
-        spanX: mmToM(300),
-        spanZ: mmToM(300),
+        spanX: cmToM(30),
+        spanZ: cmToM(30),
       },
       space,
     );
@@ -109,8 +109,8 @@ describe("fixture geometry", () => {
         id: "beam",
         type: "beam",
         walls: ["back", "right", "left"],
-        protrusion: mmToM(300),
-        drop: mmToM(300),
+        protrusion: cmToM(30),
+        drop: cmToM(30),
       },
     ];
     const tall = box({ id: "tall", x: 0.15, z: 2, width: 0.2, depth: 0.2, height: 2.2 });

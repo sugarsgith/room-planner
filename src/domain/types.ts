@@ -1,7 +1,6 @@
 /**
  * Project file schema v2.
- * Internal lengths are meters. Furniture dimensions in the UI are centimeters.
- * Fixture sizes and furniture elevation in the UI are millimeters.
+ * Internal lengths are meters. Every length in the UI is centimeters (0.1 cm).
  * Version 1 files migrate on load (fixtures default to [], elevation to 0).
  * See AGENTS.md for the coordinate system and rotation convention.
  */

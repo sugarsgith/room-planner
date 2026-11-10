@@ -68,26 +68,40 @@ test("fixtures, save status, swing warning, and 3D", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("./");
   await page.getByTestId("fixture-add-pillar").click();
-  await page.getByTestId("fixture-span-x").fill("300");
-  await page.getByTestId("fixture-span-z").fill("300");
+  await page.getByTestId("fixture-span-x").fill("30");
+  await page.getByTestId("fixture-span-z").fill("30");
   await page.getByTestId("fixture-commit").click();
   await expect(page.locator("[data-fixture-type=pillar]")).toBeVisible();
 
   await page.getByTestId("fixture-add-storage").click();
   await page.getByTestId("fixture-corner").selectOption("front-left");
-  await page.getByTestId("fixture-width").fill("900");
-  await page.getByTestId("fixture-depth").fill("450");
-  await page.getByTestId("fixture-height").fill("1800");
+  await page.getByTestId("fixture-width").fill("90");
+  await page.getByTestId("fixture-depth").fill("45");
+  await page.getByTestId("fixture-height").fill("180");
   await page.getByTestId("fixture-door").selectOption("double");
   await page.getByTestId("fixture-commit").click();
+  await expect(page.getByTestId("door-swing")).toHaveCount(2);
+  await page.getByRole("button", { name: "備え付け収納（左下）" }).click();
+  await expect(page.getByTestId("edit-fixture-door")).toBeVisible();
+  await expect(page.getByTestId("edit-fixture-door")).toHaveValue("double");
+  await expect(page.getByTestId("edit-storage-width")).toHaveValue("90.0");
+  await expect(page.getByTestId("fixture-panel")).not.toContainText("mm");
+  await page.getByTestId("edit-fixture-door").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${outDir}/room-storage-edit-1440.png` });
+  await page.getByTestId("edit-fixture-door").selectOption("single");
+  await expect(page.getByTestId("edit-hinge-left")).toBeVisible();
+  await page.getByTestId("edit-hinge-right").click();
+  await expect(page.getByTestId("edit-hinge-right")).toHaveClass(/active/);
+  await expect(page.getByTestId("door-swing")).toHaveCount(1);
+  await page.getByTestId("edit-fixture-door").selectOption("double");
   await expect(page.getByTestId("door-swing")).toHaveCount(2);
 
   await page.getByTestId("fixture-add-beam").click();
   await page.getByTestId("fixture-wall-back").click();
   await page.getByTestId("fixture-wall-right").click();
   await page.getByTestId("fixture-wall-left").click();
-  await page.getByTestId("fixture-beam-out").fill("300");
-  await page.getByTestId("fixture-beam-drop").fill("300");
+  await page.getByTestId("fixture-beam-out").fill("30");
+  await page.getByTestId("fixture-beam-drop").fill("30");
   await page.getByTestId("fixture-commit").click();
   await expect(page.locator("[data-fixture-type=beam]")).toHaveCount(3);
 

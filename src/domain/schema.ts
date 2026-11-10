@@ -1,5 +1,5 @@
 import { fixtureError, isPlanCorner, isPlanWall } from "./fixtures";
-import { mToCm, mToMm } from "./units";
+import { mToCm } from "./units";
 import {
   SCHEMA_VERSION,
   type Furniture,
@@ -238,7 +238,7 @@ function validateFurniture(value: unknown, label: string): string | null {
       return `${label} の底の高さが NaN です。`;
     }
     if (!isFiniteNumber(value.elevation) || value.elevation < 0 || value.elevation > 20) {
-      return `${label} の底の高さは 0〜${mToMm(20)}mm の範囲で指定してください。`;
+      return `${label} の底の高さは 0〜${mToCm(20)}cm の範囲で指定してください。`;
     }
   }
   return null;

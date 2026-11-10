@@ -21,7 +21,7 @@ import type { Furniture, Room, RoomFixture, Vec2 } from "./types";
  * Three.js rotation.y must be -θ (radians) because +Y rotation is
  * counter-clockwise from above.
  *
- * Touching edges are NOT overlaps. EPS is 0.1 mm, finer than the 1 mm UI grid.
+ * Touching edges are NOT overlaps. EPS is 0.01 cm, finer than the 0.1 cm UI grid.
  */
 export const OVERLAP_EPSILON_M = 0.0001;
 

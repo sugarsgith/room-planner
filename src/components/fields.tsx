@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { cmToM, formatCm, formatMm, mmToM } from "../domain/units";
+import { cmToM, formatCm } from "../domain/units";
 import { useEditor } from "../state/store";
 
 export function NumberField({
@@ -9,7 +9,6 @@ export function NumberField({
   maxM,
   onPreview,
   testId,
-  unit = "cm",
 }: {
   label: string;
   valueM: number;
@@ -17,24 +16,22 @@ export function NumberField({
   maxM: number;
   onPreview: (meters: number) => void;
   testId?: string;
-  unit?: "cm" | "mm";
 }) {
   const beginGesture = useEditor((s) => s.beginGesture);
   const endGesture = useEditor((s) => s.endGesture);
   const cancelGesture = useEditor((s) => s.cancelGesture);
-  const shown = (meters: number) => (unit === "mm" ? formatMm(meters) : formatCm(meters));
-  const [text, setText] = useState(() => shown(valueM));
+  const [text, setText] = useState(() => formatCm(valueM));
   const focused = useRef(false);
-  const origin = useRef(shown(valueM));
+  const origin = useRef(formatCm(valueM));
 
   useEffect(() => {
-    if (!focused.current) setText(shown(valueM));
-  }, [valueM, unit]);
+    if (!focused.current) setText(formatCm(valueM));
+  }, [valueM]);
 
   function parse(raw: string): number | null {
     const n = Number(raw);
     if (!Number.isFinite(n)) return null;
-    const meters = unit === "mm" ? mmToM(n) : cmToM(Math.round(n * 10) / 10);
+    const meters = cmToM(Math.round(n * 10) / 10);
     if (meters < minM - 1e-9 || meters > maxM + 1e-9) return null;
     return meters;
   }
@@ -48,7 +45,7 @@ export function NumberField({
         value={text}
         onFocus={() => {
           focused.current = true;
-          origin.current = shown(valueM);
+          origin.current = formatCm(valueM);
           beginGesture();
         }}
         onChange={(event) => {
@@ -67,13 +64,13 @@ export function NumberField({
           }
           onPreview(meters);
           endGesture();
-          setText(shown(meters));
+          setText(formatCm(meters));
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter") event.currentTarget.blur();
         }}
       />
-      <span className="unit">{unit}</span>
+      <span className="unit">cm</span>
     </label>
   );
 }

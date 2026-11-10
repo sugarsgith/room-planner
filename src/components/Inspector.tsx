@@ -153,7 +153,6 @@ export function Inspector() {
             />
             <NumberField
               label="底の高さ"
-              unit="mm"
               valueM={selected.elevation ?? 0}
               minM={0}
               maxM={20}
