@@ -15,6 +15,7 @@
 - **重なってもいい家具** … 選択中の家具で、重ねてよい相手を選べます。どちらかが相手を選んでいれば警告しません。許可した側は 2D で薄く、破線で、相手より手前に描きます。
 - **壁** … 3D の「壁を表示」「壁を半透明」。初期状態は半透明です。壁の厚みは室内寸法の外側にあります。
 - **元に戻す** … ボタン、または Ctrl/⌘+Z。やり直すは Ctrl/⌘+Shift+Z と Ctrl+Y。
+- **配置** … 左の「配置」で案を切り替えます。基準は編集できます。「複製」で検討案を足し、「比較」で基準と左右（電話では上下）に並べます。比較中は動かせません。「この案を編集」で戻ります。名前・色・寸法は全部の案に共通です。底の高さと重なりの許可は、その案だけです。「この案から外す」とその案だけから消えます。「家具を消す」は確認のあと、入っている案すべてから消します。
 - **書き出し / 読み込み** … JSON ファイルです。不正なファイルは読み込まず、今の配置もディスク上の保存も変えません。
 
 平面図の下辺が手前（Z = 0）、上辺が奥です。右が +X です。
@@ -63,11 +64,11 @@ Cloudflare Pages では、ビルドコマンド `npm run build`、出力ディ�
 
 ## データ形式
 
-localStorage のキーは `room-planner.project.v1` です（中身の版は別です）。書き出す JSON も同じ形です。長さはメートル、いまの `schemaVersion` は `3` です。`1` と `2` は読み込み時に 3 へ移行します（出っ張りが無ければ空、`elevation` と `allowOverlapIds` が無ければ 0 と空配列）。壊れた JSON は移行せず、元の文字列も上書きしません。
+localStorage のキーは `room-planner.project.v1` です（中身の版は別です）。書き出す JSON も同じ形です。長さはメートル、いまの `schemaVersion` は `4` です。`1` から `3` は読み込み時に 4 へ移行します。家具の名前・寸法・色は `furniture`、各配置の位置と回転は `layouts[].placements` です。壊れた JSON は移行せず、元の文字列も上書きしません。v3 以前からの最初の保存の前に、元の文字列を `room-planner.project.v3.backup` へ一度だけ退避します。
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "app": "room-planner",
   "room": {
     "id": "room-main",
@@ -84,14 +85,16 @@ localStorage のキーは `room-planner.project.v1` です（中身の版は別�
     "openings": [],
     "fixtures": []
   },
+  "furniture": [],
   "layouts": [
     {
       "id": "layout-default",
       "name": "現在の配置",
-      "furniture": []
+      "placements": []
     }
   ],
-  "activeLayoutId": "layout-default"
+  "activeLayoutId": "layout-default",
+  "baselineLayoutId": "layout-default"
 }
 ```
 

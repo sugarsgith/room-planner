@@ -17,6 +17,7 @@ export function FurnitureList() {
 
   return (
     <aside className="panel list-panel">
+      <LayoutBar />
       <div className="panel-head">
         <h2>家具</h2>
         <span>{furniture.length} 件</span>
@@ -59,5 +60,45 @@ export function FurnitureList() {
         </button>
       </div>
     </aside>
+  );
+}
+
+export function LayoutBar() {
+  const project = useEditor((s) => s.project);
+  const setActiveLayout = useEditor((s) => s.setActiveLayout);
+  const duplicateLayout = useEditor((s) => s.duplicateLayout);
+  const setCompareLayout = useEditor((s) => s.setCompareLayout);
+  const others = project.layouts.filter((layout) => layout.id !== project.baselineLayoutId);
+  return (
+    <div className="layout-bar" data-testid="layout-bar">
+      <label className="layout-select-label">
+        <span>配置</span>
+        <select
+          data-testid="layout-select"
+          value={project.activeLayoutId}
+          onChange={(event) => setActiveLayout(event.target.value)}
+        >
+          {project.layouts.map((layout) => (
+            <option key={layout.id} value={layout.id}>
+              {layout.id === project.baselineLayoutId ? `基準 · ${layout.name}` : layout.name}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button type="button" data-testid="layout-duplicate" onClick={() => duplicateLayout()}>
+        複製
+      </button>
+      <button
+        type="button"
+        data-testid="layout-compare"
+        disabled={others.length === 0}
+        onClick={() => {
+          const preferred = others.find((layout) => layout.id === project.activeLayoutId) ?? others[0];
+          if (preferred) setCompareLayout(preferred.id);
+        }}
+      >
+        比較
+      </button>
+    </div>
   );
 }

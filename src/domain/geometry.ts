@@ -504,3 +504,150 @@ export function wallSegments(outline: Vec2[], thickness = 0.08): WallSegment[] {
   }
   return segments;
 }
+
+/** Items whose bottom is at or above this height are not in the walking plane. */
+const WALK_HEIGHT_M = 1.2;
+
+/**
+ * Smallest gap, in meters, between floor-level furniture and other floor
+ * furniture, pillars, built-in storage, or the inner walls.
+ * Overlap and contact are 0. Allowed overlaps are ignored.
+ * Null when nothing stands in the walking plane.
+ * This is not a path width from the entrance.
+ */
+export function minimumClearance(room: Room, items: Furniture[]): number | null {
+  const floor = items.filter((item) => (item.elevation ?? 0) < WALK_HEIGHT_M);
+  if (floor.length === 0) return null;
+  const obstacles: Furniture[] = [];
+  for (const fixture of room.fixtures ?? []) {
+    if (fixture.type !== "pillar" && fixture.type !== "storage") continue;
+    const box = obstacleFootprint(fixture, room);
+    if (!box) continue;
+    obstacles.push({ ...aabbItem(box), id: `obstacle-${fixture.id}` });
+  }
+  let min = Infinity;
+  for (const item of floor) {
+    min = Math.min(min, wallClearance(item, room.width, room.depth));
+    if (min <= 0) return 0;
+    for (const other of floor) {
+      if (other.id === item.id || pairAllowsOverlap(item, other)) continue;
+      min = Math.min(min, footprintDistance(item, other));
+      if (min <= 0) return 0;
+    }
+    for (const obstacle of obstacles) {
+      min = Math.min(min, footprintDistance(item, obstacle));
+      if (min <= 0) return 0;
+    }
+  }
+  return Number.isFinite(min) ? min : null;
+}
+
+function wallClearance(item: Furniture, width: number, depth: number): number {
+  if (item.shape === "cylinder") {
+    const radius = item.width / 2;
+    const gap = Math.min(item.x - radius, item.z - radius, width - (item.x + radius), depth - (item.z + radius));
+    return gap <= OVERLAP_EPSILON_M ? 0 : gap;
+  }
+  let gap = Infinity;
+  for (const point of footprintCorners(item)) {
+    gap = Math.min(gap, point.x, point.z, width - point.x, depth - point.z);
+  }
+  return gap <= OVERLAP_EPSILON_M ? 0 : gap;
+}
+
+function footprintDistance(a: Furniture, b: Furniture): number {
+  if (footprintsOverlap(a, b)) return 0;
+  if (a.shape === "cylinder" && b.shape === "cylinder") {
+    const gap = Math.hypot(a.x - b.x, a.z - b.z) - a.width / 2 - b.width / 2;
+    return gap <= OVERLAP_EPSILON_M ? 0 : gap;
+  }
+  if (a.shape === "cylinder") return circlePolygonDistance(a, footprintCorners(b));
+  if (b.shape === "cylinder") return circlePolygonDistance(b, footprintCorners(a));
+  return polygonDistance(footprintCorners(a), footprintCorners(b));
+}
+
+function polygonDistance(a: Point[], b: Point[]): number {
+  let min = Infinity;
+  for (let i = 0; i < a.length; i++) {
+    const a2 = a[(i + 1) % a.length];
+    for (let j = 0; j < b.length; j++) {
+      const b2 = b[(j + 1) % b.length];
+      min = Math.min(min, segmentDistance(a[i], a2, b[j], b2));
+    }
+  }
+  return min <= OVERLAP_EPSILON_M ? 0 : min;
+}
+
+function circlePolygonDistance(circle: Furniture, corners: Point[]): number {
+  const radius = circle.width / 2;
+  const center = { x: circle.x, z: circle.z };
+  if (pointInPolygon(center, corners)) return 0;
+  let min = Infinity;
+  for (let i = 0; i < corners.length; i++) {
+    min = Math.min(min, pointSegmentDistance(center, corners[i], corners[(i + 1) % corners.length]));
+  }
+  const gap = min - radius;
+  return gap <= OVERLAP_EPSILON_M ? 0 : gap;
+}
+
+function pointInPolygon(point: Point, corners: Point[]): boolean {
+  let inside = false;
+  for (let i = 0, j = corners.length - 1; i < corners.length; j = i++) {
+    const a = corners[i];
+    const b = corners[j];
+    const crosses = a.z > point.z !== b.z > point.z;
+    if (!crosses) continue;
+    const x = ((b.x - a.x) * (point.z - a.z)) / (b.z - a.z) + a.x;
+    if (point.x < x) inside = !inside;
+  }
+  return inside;
+}
+
+function pointSegmentDistance(point: Point, a: Point, b: Point): number {
+  const dx = b.x - a.x;
+  const dz = b.z - a.z;
+  const len2 = dx * dx + dz * dz;
+  if (len2 < 1e-12) return Math.hypot(point.x - a.x, point.z - a.z);
+  const t = clamp((point.x - a.x) * dx + (point.z - a.z) * dz, 0, len2) / len2;
+  return Math.hypot(point.x - (a.x + t * dx), point.z - (a.z + t * dz));
+}
+
+function segmentDistance(p1: Point, p2: Point, q1: Point, q2: Point): number {
+  const d1x = p2.x - p1.x;
+  const d1z = p2.z - p1.z;
+  const d2x = q2.x - q1.x;
+  const d2z = q2.z - q1.z;
+  const rx = p1.x - q1.x;
+  const rz = p1.z - q1.z;
+  const a = d1x * d1x + d1z * d1z;
+  const e = d2x * d2x + d2z * d2z;
+  const f = d2x * rx + d2z * rz;
+  let s: number;
+  let t: number;
+  if (a <= 1e-12 && e <= 1e-12) return Math.hypot(rx, rz);
+  if (a <= 1e-12) {
+    s = 0;
+    t = clamp(f, 0, e) / e;
+  } else {
+    const c = d1x * rx + d1z * rz;
+    if (e <= 1e-12) {
+      t = 0;
+      s = clamp(-c, 0, a) / a;
+    } else {
+      const b = d1x * d2x + d1z * d2z;
+      const denom = a * e - b * b;
+      s = denom > 1e-12 ? clamp(b * f - c * e, 0, denom) / denom : 0;
+      t = (b * s + f) / e;
+      if (t < 0) {
+        t = 0;
+        s = clamp(-c, 0, a) / a;
+      } else if (t > 1) {
+        t = 1;
+        s = clamp(b - c, 0, a) / a;
+      }
+    }
+  }
+  const dx = p1.x + d1x * s - (q1.x + d2x * t);
+  const dz = p1.z + d1z * s - (q1.z + d2z * t);
+  return Math.hypot(dx, dz);
+}

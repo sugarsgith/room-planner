@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 import { arcPoints, beamFootprints, entranceSectors, obstacleFootprint, openingPlacement, storageSectors, windowRecess } from "../domain/fixtures";
 import { analyzeLayout, drawsAsAllowedOverlap, footprintCorners, issueIsActive, rotateLocal } from "../domain/geometry";
-import { activeFurniture } from "../domain/schema";
+import { activeFurniture, resolveLayout } from "../domain/schema";
+import type { Furniture } from "../domain/types";
 import { formatCm, normalizeDegrees } from "../domain/units";
 import { useEditor } from "../state/store";
 
@@ -35,7 +36,15 @@ type Drag = DragMove | DragRotate | DragPan;
  * The group is translate(offset) scale(ppm) and SVG y = -z, so the scale stays positive.
  * screenY = offsetY - z * ppm.
  */
-export function PlanView() {
+export function PlanView({
+  layoutId,
+  readOnly = false,
+  ghostFurniture = [],
+}: {
+  layoutId?: string;
+  readOnly?: boolean;
+  ghostFurniture?: Furniture[];
+} = {}) {
   const project = useEditor((s) => s.project);
   const selectedId = useEditor((s) => s.selectedId);
   const select = useEditor((s) => s.select);
@@ -44,7 +53,8 @@ export function PlanView() {
   const endGesture = useEditor((s) => s.endGesture);
   const viewCommand = useEditor((s) => s.viewCommand);
   const room = project.room;
-  const furniture = activeFurniture(project);
+  const furniture = layoutId ? resolveLayout(project, layoutId) : activeFurniture(project);
+  const hatchId = `fixture-hatch-${layoutId ?? "active"}`;
   const issues = useMemo(() => analyzeLayout(room, furniture), [room, furniture]);
   const issueById = useMemo(() => new Map(issues.map((issue) => [issue.id, issue])), [issues]);
 
@@ -64,7 +74,7 @@ export function PlanView() {
     const viewW = svg.clientWidth;
     const viewH = svg.clientHeight;
     if (viewW < 20 || viewH < 20) return;
-    const margin = 72;
+    const margin = Math.min(72, Math.max(12, Math.min(viewW, viewH) * 0.12));
     const next = Math.min((viewW - margin * 2) / room.width, (viewH - margin * 2) / room.depth);
     const fitted = Math.max(12, Math.min(next, 400));
     const roomPxH = room.depth * fitted;
@@ -210,6 +220,7 @@ export function PlanView() {
   }
 
   function onItemDown(event: PointerEvent, id: string, mode: "move" | "rotate") {
+    if (readOnly) return;
     if (event.button !== 0) return;
     event.stopPropagation();
     event.preventDefault();
@@ -282,7 +293,7 @@ export function PlanView() {
       <svg
         ref={svgRef}
         className="plan"
-        data-testid="view-2d"
+        data-testid={readOnly ? `plan-${layoutId}` : "view-2d"}
         onPointerDown={onBackgroundDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
@@ -310,7 +321,7 @@ export function PlanView() {
           ))}
           <path d={outline} className="room-fill" />
           <defs>
-            <pattern id="fixture-hatch" width="0.08" height="0.08" patternUnits="userSpaceOnUse">
+            <pattern id={hatchId} width="0.08" height="0.08" patternUnits="userSpaceOnUse">
               <path d="M-0.02 0.02 L0.02 -0.02 M0 0.08 L0.08 0" stroke="#6d675e" strokeWidth={1 / ppm} />
             </pattern>
           </defs>
@@ -345,6 +356,7 @@ export function PlanView() {
                 />
                 <rect
                   className="fixture fixture-hatch"
+                  fill={`url(#${hatchId})`}
                   x={box.minX}
                   y={-box.maxZ}
                   width={box.maxX - box.minX}
@@ -355,6 +367,30 @@ export function PlanView() {
           })}
           <path d={outline} className="room-edge" strokeWidth={2 / ppm} />
           <OpeningGraphics room={room} ppm={ppm} />
+          {ghostFurniture.map((item) =>
+            item.shape === "cylinder" ? (
+              <circle
+                key={`ghost-${item.id}`}
+                className="furniture ghost"
+                cx={item.x}
+                cy={-item.z}
+                r={item.width / 2}
+                strokeWidth={1.4 / ppm}
+                strokeDasharray={`${0.06} ${0.04}`}
+              />
+            ) : (
+              <polygon
+                key={`ghost-${item.id}`}
+                className="furniture ghost"
+                points={footprintCorners(item)
+                  .map((point) => `${point.x},${-point.z}`)
+                  .join(" ")}
+                strokeWidth={1.4 / ppm}
+                strokeLinejoin="round"
+                strokeDasharray={`${0.06} ${0.04}`}
+              />
+            ),
+          )}
           {[...furniture]
             .sort((a, b) => Number(drawsAsAllowedOverlap(a, furniture)) - Number(drawsAsAllowedOverlap(b, furniture)))
             .map((item) => {
@@ -408,7 +444,8 @@ export function PlanView() {
               );
             });
           })}
-          {furniture
+          {!readOnly &&
+            furniture
             .filter((item) => item.id === selectedId)
             .map((item) => {
               const reach = (item.shape === "cylinder" ? item.width : item.depth) / 2;

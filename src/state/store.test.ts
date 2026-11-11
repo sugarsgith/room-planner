@@ -117,7 +117,8 @@ describe("editor store", () => {
     useEditor.getState().resumePersist();
     const saved = map.get(STORAGE_KEY);
     expect(saved).not.toBe(raw);
-    expect(saved && JSON.parse(saved).layouts[0].furniture.find((item: { id: string }) => item.id === "bed").x).toBe(cmToM(10));
+    const savedProject = saved ? JSON.parse(saved) : null;
+    expect(savedProject.layouts[0].placements.find((item: { furnitureId: string }) => item.furnitureId === "bed").x).toBe(cmToM(10));
     expect(map.get(BACKUP_KEY)).toBe(raw);
   });
 
@@ -191,5 +192,33 @@ describe("editor store", () => {
     expect(map.get(STORAGE_KEY)).toBe(saved);
     useEditor.getState().rotateBy("sofa", -90);
     expect(map.get(STORAGE_KEY)).toBe(saved);
+  });
+
+  it("edits a duplicated layout independently and shares dimensions", () => {
+    useEditor.getState().duplicateLayout();
+    const variant = useEditor.getState().project.activeLayoutId;
+    expect(variant).not.toBe("layout-default");
+    useEditor.getState().updateFurniture("sofa", { x: cmToM(100) }, "commit");
+    useEditor.getState().setActiveLayout("layout-default");
+    expect(mToCm(activeFurniture(useEditor.getState().project).find((item) => item.id === "sofa")!.x)).toBe(190);
+    useEditor.getState().setActiveLayout(variant);
+    expect(mToCm(activeFurniture(useEditor.getState().project).find((item) => item.id === "sofa")!.x)).toBe(100);
+    useEditor.getState().updateFurniture("sofa", { width: cmToM(150) }, "commit");
+    useEditor.getState().setActiveLayout("layout-default");
+    expect(mToCm(activeFurniture(useEditor.getState().project).find((item) => item.id === "sofa")!.width)).toBe(150);
+  });
+
+  it("drops a placement from one layout and can delete the furniture from every layout", () => {
+    useEditor.getState().duplicateLayout();
+    const variant = useEditor.getState().project.activeLayoutId;
+    useEditor.getState().remove("table");
+    expect(activeFurniture(useEditor.getState().project).some((item) => item.id === "table")).toBe(false);
+    expect(useEditor.getState().project.furniture.some((item) => item.id === "table")).toBe(true);
+    useEditor.getState().setActiveLayout("layout-default");
+    expect(activeFurniture(useEditor.getState().project).some((item) => item.id === "table")).toBe(true);
+    useEditor.getState().deleteFurniture("table");
+    expect(useEditor.getState().project.furniture.some((item) => item.id === "table")).toBe(false);
+    useEditor.getState().setActiveLayout(variant);
+    expect(activeFurniture(useEditor.getState().project).some((item) => item.id === "table")).toBe(false);
   });
 });

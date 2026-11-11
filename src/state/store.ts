@@ -1,10 +1,10 @@
 import { create } from "zustand";
 import { rectangleOutline } from "../domain/geometry";
 import { createInitialProject } from "../domain/initial";
-import { activeFurniture, LIMITS, parseProjectJson } from "../domain/schema";
+import { activeFurniture, activeLayout, LIMITS, parseProjectJson } from "../domain/schema";
 import { loadProject, saveProject, type KeyValueStorage, type LoadStatus } from "../domain/storage";
 import { fixtureError } from "../domain/fixtures";
-import type { Furniture, FurnitureShape, Project, Room, RoomFixture } from "../domain/types";
+import type { Furniture, FurnitureItem, FurnitureShape, Placement, Project, Room, RoomFixture } from "../domain/types";
 import { normalizeDegrees, roundM } from "../domain/units";
 
 const HISTORY_LIMIT = 100;
@@ -38,9 +38,17 @@ export interface EditorState {
   loadStatus: LoadStatus;
   loadError: string | null;
   corruptRaw: string | null;
+  /** Pre-v4 text waiting for a one-time backup. Not part of undo. */
+  legacyRaw: string | null;
+  /** Read-only comparison against the baseline. Not part of the document. */
+  compareLayoutId: string | null;
   importError: string | null;
   select: (id: string | null) => void;
   setViewMode: (mode: ViewMode) => void;
+  setActiveLayout: (id: string) => void;
+  duplicateLayout: () => void;
+  setCompareLayout: (id: string | null) => void;
+  deleteFurniture: (id: string) => void;
   setWallsVisible: (value: boolean) => void;
   setWallsTransparent: (value: boolean) => void;
   requestViewCommand: (type: ViewCommand["type"]) => void;
@@ -134,8 +142,8 @@ export const useEditor = create<EditorState>((set, get) => {
       return;
     }
     try {
-      saveProject(boundStorage, state.project);
-      set({ saveStatus: "saved", savedAt: Date.now() });
+      saveProject(boundStorage, state.project, state.legacyRaw);
+      set({ saveStatus: "saved", savedAt: Date.now(), legacyRaw: null });
     } catch {
       set({
         persistAllowed: false,
@@ -188,6 +196,8 @@ export const useEditor = create<EditorState>((set, get) => {
     loadStatus: "empty",
     loadError: null,
     corruptRaw: null,
+    legacyRaw: null,
+    compareLayoutId: null,
     importError: null,
     saveStatus: "idle",
     savedAt: null,
@@ -197,7 +207,53 @@ export const useEditor = create<EditorState>((set, get) => {
         selectedId: id,
         selectionSeq: id ? state.selectionSeq + 1 : state.selectionSeq,
       })),
-    setViewMode: (mode) => set({ viewMode: mode }),
+    setViewMode: (mode) => set({ viewMode: mode, compareLayoutId: mode === "3d" ? null : get().compareLayoutId }),
+    setActiveLayout: (id) => {
+      const project = get().project;
+      if (!project.layouts.some((layout) => layout.id === id) || project.activeLayoutId === id) return;
+      const next = { ...project, activeLayoutId: id };
+      const selected = activeFurniture(next).some((item) => item.id === get().selectedId) ? get().selectedId : null;
+      set({ project: next, selectedId: selected });
+      scheduleSave();
+    },
+    duplicateLayout: () => {
+      if (get().gestureBefore) get().endGesture();
+      const project = get().project;
+      const source = activeLayout(project);
+      const copyId = createId();
+      const copy = {
+        id: copyId,
+        name: nextVariantName(project.layouts),
+        placements: structuredClone(source.placements),
+      };
+      commitProject({ ...project, layouts: [...project.layouts, copy], activeLayoutId: copyId }, null);
+    },
+    setCompareLayout: (id) => {
+      if (id !== null) {
+        const project = get().project;
+        if (!project.layouts.some((layout) => layout.id === id) || id === project.baselineLayoutId) return;
+      }
+      set({ compareLayoutId: id, viewMode: id ? "2d" : get().viewMode });
+    },
+    deleteFurniture: (id) => {
+      if (get().gestureBefore) get().endGesture();
+      const project = get().project;
+      if (!project.furniture.some((item) => item.id === id)) return;
+      const next: Project = {
+        ...project,
+        furniture: project.furniture.filter((item) => item.id !== id),
+        layouts: project.layouts.map((layout) => ({
+          ...layout,
+          placements: layout.placements
+            .filter((placement) => placement.furnitureId !== id)
+            .map((placement) => ({
+              ...placement,
+              allowOverlapIds: placement.allowOverlapIds.filter((other) => other !== id),
+            })),
+        })),
+      };
+      commitProject(next, get().selectedId === id ? null : get().selectedId);
+    },
     setWallsVisible: (wallsVisible) => set({ wallsVisible }),
     setWallsTransparent: (wallsTransparent) => set({ wallsTransparent }),
     requestViewCommand: (type) =>
@@ -238,7 +294,11 @@ export const useEditor = create<EditorState>((set, get) => {
       const resolved: UpdateMode = mode === "preview" && !get().gestureBefore ? "commit" : mode;
       if (resolved === "commit" && get().gestureBefore) get().endGesture();
       const current = get().project;
-      const next = mapFurniture(current, id, (item) => applyFurniturePatch(item, patch));
+      const currentItem = activeFurniture(current).find((item) => item.id === id);
+      if (!currentItem) return;
+      const patched = applyFurniturePatch(currentItem, patch);
+      if (!patched) return;
+      const next = projectWithResolved(current, id, patched);
       if (!next || sameDocument(current, next)) return;
       if (resolved === "preview") {
         set({ project: next });
@@ -273,14 +333,25 @@ export const useEditor = create<EditorState>((set, get) => {
       const project = get().project;
       const source = activeFurniture(project).find((item) => item.id === id);
       if (!source) return;
-      const copy: Furniture = {
-        ...source,
-        id: createId(),
+      const copyId = createId();
+      const catalog: FurnitureItem = {
+        id: copyId,
         name: `${source.name} のコピー`.slice(0, LIMITS.name.max),
+        shape: source.shape,
+        width: source.width,
+        depth: source.depth,
+        height: source.height,
+        color: source.color,
+      };
+      const placement: Placement = {
+        furnitureId: copyId,
         x: roundM(source.x + 0.2),
         z: roundM(source.z + 0.2),
+        rotation: source.rotation,
+        elevation: source.elevation ?? 0,
+        allowOverlapIds: [...(source.allowOverlapIds ?? [])],
       };
-      commitProject(mapActive(project, (items) => [...items, copy]), copy.id);
+      commitProject(placeOnActive({ ...project, furniture: [...project.furniture, catalog] }, placement), copyId);
     },
 
     remove: (id) => {
@@ -288,36 +359,32 @@ export const useEditor = create<EditorState>((set, get) => {
       const project = get().project;
       if (!activeFurniture(project).some((item) => item.id === id)) return;
       const selectedId = get().selectedId === id ? null : get().selectedId;
-      commitProject(
-        mapActive(project, (items) =>
-          items
-            .filter((item) => item.id !== id)
-            .map((item) => ({
-              ...item,
-              allowOverlapIds: (item.allowOverlapIds ?? []).filter((other) => other !== id),
-            })),
-        ),
-        selectedId,
-      );
+      commitProject(dropFromLayout(project, project.activeLayoutId, id), selectedId);
     },
 
     addFurniture: (shape) => {
       if (get().gestureBefore) get().endGesture();
       const project = get().project;
       const diameter = 0.5;
-      const item: Furniture = {
-        id: createId(),
+      const id = createId();
+      const catalog: FurnitureItem = {
+        id,
         name: shape === "cylinder" ? "新しい円柱" : "新しい家具",
         shape,
         width: shape === "cylinder" ? diameter : 0.6,
         depth: shape === "cylinder" ? diameter : 0.4,
         height: 0.5,
+        color: shape === "cylinder" ? "#90a4ae" : "#8d6e63",
+      };
+      const placement: Placement = {
+        furnitureId: id,
         x: roundM(project.room.width / 2),
         z: roundM(project.room.depth / 2),
         rotation: 0,
-        color: shape === "cylinder" ? "#90a4ae" : "#8d6e63",
+        elevation: 0,
+        allowOverlapIds: [],
       };
-      commitProject(mapActive(project, (items) => [...items, item]), item.id);
+      commitProject(placeOnActive({ ...project, furniture: [...project.furniture, catalog] }, placement), id);
     },
 
     undo: () => {
@@ -430,36 +497,76 @@ export const useEditor = create<EditorState>((set, get) => {
   };
 });
 
-function mapActive(project: Project, fn: (items: Furniture[]) => Furniture[]): Project {
+function nextVariantName(layouts: { name: string }[]): string {
+  const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  for (const letter of letters) {
+    const name = `検討案${letter}`;
+    if (!layouts.some((layout) => layout.name === name)) return name;
+  }
+  return `検討案${layouts.length + 1}`;
+}
+
+function projectWithResolved(project: Project, id: string, patched: Furniture): Project | null {
+  const furniture = project.furniture.map((item) => {
+    if (item.id !== id) return item;
+    return {
+      ...item,
+      name: patched.name,
+      shape: patched.shape,
+      width: patched.width,
+      depth: patched.depth,
+      height: patched.height,
+      color: patched.color,
+    };
+  });
+  const layouts = project.layouts.map((layout) => {
+    if (layout.id !== project.activeLayoutId) return layout;
+    return {
+      ...layout,
+      placements: layout.placements.map((placement) => {
+        if (placement.furnitureId !== id) return placement;
+        return {
+          ...placement,
+          x: patched.x,
+          z: patched.z,
+          rotation: patched.rotation,
+          elevation: patched.elevation ?? 0,
+          allowOverlapIds: [...(patched.allowOverlapIds ?? [])],
+        };
+      }),
+    };
+  });
+  const next = { ...project, furniture, layouts };
+  return sameDocument(project, next) ? null : next;
+}
+
+function placeOnActive(project: Project, placement: Placement): Project {
   return {
     ...project,
     layouts: project.layouts.map((layout) =>
-      layout.id === project.activeLayoutId ? { ...layout, furniture: fn(layout.furniture) } : layout,
+      layout.id === project.activeLayoutId
+        ? { ...layout, placements: [...layout.placements, placement] }
+        : layout,
     ),
   };
 }
 
-function mapFurniture(
-  project: Project,
-  id: string,
-  fn: (item: Furniture) => Furniture | null,
-): Project | null {
-  if (!activeFurniture(project).some((item) => item.id === id)) return null;
-  let changed = false;
-  const next = mapActive(project, (items) =>
-    items.map((item) => {
-      if (item.id !== id) return item;
-      const updated = fn(item);
-      if (!updated || furnitureEqual(item, updated)) return item;
-      changed = true;
-      return updated;
+function dropFromLayout(project: Project, layoutId: string, furnitureId: string): Project {
+  return {
+    ...project,
+    layouts: project.layouts.map((layout) => {
+      if (layout.id !== layoutId) return layout;
+      return {
+        ...layout,
+        placements: layout.placements
+          .filter((placement) => placement.furnitureId !== furnitureId)
+          .map((placement) => ({
+            ...placement,
+            allowOverlapIds: placement.allowOverlapIds.filter((other) => other !== furnitureId),
+          })),
+      };
     }),
-  );
-  return changed ? next : null;
-}
-
-function furnitureEqual(a: Furniture, b: Furniture): boolean {
-  return stableStringify(a) === stableStringify(b);
+  };
 }
 
 function applyFurniturePatch(item: Furniture, patch: FurniturePatch): Furniture | null {
@@ -542,6 +649,8 @@ export function initEditor(storage: KeyValueStorage, options?: { autosaveDelayMs
     loadStatus: loaded.status,
     loadError: loaded.error ?? null,
     corruptRaw: loaded.raw ?? null,
+    legacyRaw: loaded.legacyRaw ?? null,
+    compareLayoutId: null,
     importError: null,
     saveStatus: loaded.status === "ok" ? "saved" : "idle",
     savedAt: loaded.status === "ok" ? now : null,

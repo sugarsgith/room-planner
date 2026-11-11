@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { CompareStage } from "./components/CompareStage";
+import { DiffPanel } from "./components/DiffPanel";
 import { FurnitureList } from "./components/FurnitureList";
 import { Inspector } from "./components/Inspector";
 import { PlanView } from "./components/PlanView";
@@ -20,6 +22,7 @@ export function App() {
   const project = useEditor((s) => s.project);
   const selectedId = useEditor((s) => s.selectedId);
   const selectionSeq = useEditor((s) => s.selectionSeq);
+  const compareLayoutId = useEditor((s) => s.compareLayoutId);
   useHistoryKeys();
 
   const furniture = activeFurniture(project);
@@ -29,8 +32,8 @@ export function App() {
   const [phoneTab, setPhoneTab] = useState<"list" | "edit" | "room">("list");
 
   useEffect(() => {
-    if (selectionSeq > 0) setPhoneTab("edit");
-  }, [selectionSeq]);
+    if (selectionSeq > 0 && !compareLayoutId) setPhoneTab("edit");
+  }, [selectionSeq, compareLayoutId]);
 
   return (
     <div className="app">
@@ -61,10 +64,10 @@ export function App() {
           <p>{loadError}</p>
         </div>
       )}
-      <div className="workspace" data-phone-tab={phoneTab}>
-        <FurnitureList />
-        <main className="stage" data-testid="stage">
-          {viewMode === "2d" ? <PlanView /> : <RoomScene />}
+      <div className="workspace" data-phone-tab={phoneTab} data-compare={compareLayoutId ? "true" : "false"}>
+        {compareLayoutId ? <DiffPanel /> : <FurnitureList />}
+        <main className={compareLayoutId ? "stage compare" : "stage"} data-testid="stage">
+          {compareLayoutId ? <CompareStage /> : viewMode === "2d" ? <PlanView /> : <RoomScene />}
         </main>
         <nav className="phone-tabs" data-testid="phone-tabs" aria-label="パネル">
           <button

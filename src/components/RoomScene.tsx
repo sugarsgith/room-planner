@@ -29,7 +29,8 @@ export function RoomScene() {
 
 function Scene() {
   const room = useEditor((s) => s.project.room);
-  const furniture = useEditor((s) => activeFurniture(s.project));
+  const project = useEditor((s) => s.project);
+  const furniture = activeFurniture(project);
   const selectedId = useEditor((s) => s.selectedId);
   const wallsVisible = useEditor((s) => s.wallsVisible);
   const wallsTransparent = useEditor((s) => s.wallsTransparent);

@@ -30,12 +30,13 @@
 
 ## データ
 
-`schemaVersion` は 3。形は `src/domain/types.ts`。1 と 2 は `validateProject` が 3 に移行する。それ以外の版は拒否し、保存データは触らない。
+`schemaVersion` は 4。形は `src/domain/types.ts`。1、2、3 は `validateProject` が 4 に移行する。それ以外の版は拒否し、保存データは触らない。家具の実体は `furniture`、レイアウトは `placements` だけを持つ。
 
 - `room.outline` … 上から見て反時計回りの XZ 多角形。外接矩形は `[0, width] × [0, depth]`。出っ張りを足しても outline は変えない。
 - `room.fixtures` … 柱・備え付け収納・梁。配置は `src/domain/fixtures.ts`。
 - `room.openings` … 窓・ドア。UI は未実装。読み込み時には検証する。
-- `layouts[]` と `activeLayoutId` … 配置。UI はアクティブな 1 件だけを編集し、残りは保存時に残す。
+- `furniture[]` … 名前・形状・寸法・色。全レイアウト共通。
+- `layouts[]` と `activeLayoutId` … 配置。各要素は `placements`（位置・回転・底の高さ・重なり許可）。UI はアクティブな 1 件を編集し、比較中は閲覧だけ。`baselineLayoutId` は基準で、編集できる。
 - `furniture.shape` … `"box"` または `"cylinder"`。円柱は `width === depth`（直径）。`elevation` は底の高さ（省略は 0）。`allowOverlapIds` は重ねてよい相手。どちらかが相手を含めば重なり警告を出さない。
 - `fixtures` の `window` は壁の開口と外側の出幅。出幅の中は、底の高さが窓台以上なら部屋の外に数えない。`entrance` は開口だけで、廊下は描かない。
 - 未知の shape / opening type / fixture type / schemaVersion は拒否する。未知の追加フィールドは通過させ、更新時はオブジェクトのスプレッドで残す。
