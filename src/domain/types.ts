@@ -1,11 +1,11 @@
 /**
- * Project file schema v3.
+ * Project file schema v4.
  * Internal lengths are meters. Every length in the UI is centimeters (0.1 cm).
- * Versions 1 and 2 migrate on load (fixtures, elevation, allowOverlapIds).
- * See AGENTS.md for the coordinate system and rotation convention.
+ * Versions 1, 2, and 3 migrate on load. Furniture identity lives in `furniture`;
+ * each layout stores placements only. See AGENTS.md for the coordinate system.
  */
 
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 export interface Vec2 {
   /** Meters, room X (width axis). */
@@ -148,7 +148,8 @@ export type RoomFixture = PillarFixture | StorageFixture | BeamFixture | WindowF
 /** Box uses width x depth. Cylinder uses width as the diameter; depth must equal width. */
 export type FurnitureShape = "box" | "cylinder";
 
-export interface Furniture {
+/** Shared across every layout. Position is not stored here. */
+export interface FurnitureItem {
   id: string;
   name: string;
   shape: FurnitureShape;
@@ -158,6 +159,18 @@ export interface Furniture {
   depth: number;
   /** Meters, floor to top. */
   height: number;
+  /** #rrggbb */
+  color: string;
+  /**
+   * Present when migration split this item off an older id whose
+   * dimensions disagreed. Comparison labels that pair 「別家具」.
+   */
+  originId?: string;
+}
+
+/** Where one catalog item sits in one layout. */
+export interface Placement {
+  furnitureId: string;
   /** Footprint center, meters. */
   x: number;
   z: number;
@@ -166,25 +179,29 @@ export interface Furniture {
    * 0 keeps width along +X and depth along +Z.
    */
   rotation: number;
-  /** #rrggbb */
-  color: string;
-  /**
-   * Meters from the floor to the bottom of the item. Omitted means 0,
-   * so the item sits on the floor. Set this to place something on storage.
-   */
+  /** Meters from the floor to the bottom. This layout only. */
+  elevation: number;
+  /** Other catalog ids this placement may overlap. This layout only. */
+  allowOverlapIds: string[];
+}
+
+/**
+ * Resolved view of one placed item. Geometry and the 2D/3D views
+ * keep using this shape; it is not the on-disk layout entry.
+ */
+export interface Furniture extends FurnitureItem {
+  x: number;
+  z: number;
+  rotation: number;
   elevation?: number;
-  /**
-   * Other furniture ids this item may overlap. The pair is allowed if
-   * either item lists the other. Omitted means none.
-   */
   allowOverlapIds?: string[];
 }
 
-/** One arrangement of furniture in the room. Comparison UI is not built yet. */
+/** One arrangement. The room and its fixtures are not copied per layout. */
 export interface Layout {
   id: string;
   name: string;
-  furniture: Furniture[];
+  placements: Placement[];
 }
 
 export interface Project {
@@ -192,8 +209,11 @@ export interface Project {
   /** Identifies files written by this app. Optional on import. */
   app?: string;
   room: Room;
+  furniture: FurnitureItem[];
   layouts: Layout[];
   activeLayoutId: string;
+  /** Editable reference arrangement. Not a lock. */
+  baselineLayoutId: string;
 }
 
 export const APP_ID = "room-planner";

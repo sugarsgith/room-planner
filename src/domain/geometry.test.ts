@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Furniture, Room } from "./types";
 import { createInitialProject } from "./initial";
+import { activeFurniture } from "./schema";
 import { mToCm } from "./units";
 import {
   analyzeLayout,
@@ -8,6 +9,7 @@ import {
   footprintCorners,
   footprintsOverlap,
   isOutsideRoom,
+  minimumClearance,
   rectangleOutline,
   wallSegments,
 } from "./geometry";
@@ -124,7 +126,7 @@ describe("initial layout and walls", () => {
     expect(mToCm(project.room.width)).toBe(270);
     expect(mToCm(project.room.depth)).toBe(360);
     expect(mToCm(project.room.ceilingHeight)).toBe(240);
-    const items = project.layouts[0].furniture;
+    const items = activeFurniture(project);
     expect(items.map((item) => item.name)).toEqual(["シングルベッド", "デスク", "2人掛けソファ", "丸テーブル"]);
     const issues = analyzeLayout(project.room, items);
     expect(issues.every((issue) => !issue.outOfRoom && !issue.exceedsCeiling && issue.overlapIds.length === 0)).toBe(true);
@@ -142,5 +144,35 @@ describe("initial layout and walls", () => {
     expect(right.length).toBeCloseTo(3.6, 5);
     expect(right.cx).toBeCloseTo(2.74, 5);
     expect(right.cz).toBeCloseTo(1.8, 5);
+  });
+});
+
+describe("minimum clearance", () => {
+  const room: Room = {
+    id: "room",
+    name: "広い部屋",
+    width: 10,
+    depth: 10,
+    ceilingHeight: 2.4,
+    outline: rectangleOutline(10, 10),
+    openings: [],
+    fixtures: [],
+  };
+
+  it("reports the gap between floor furniture, and zero when they touch or overlap", () => {
+    const left = box({ id: "a", x: 5, z: 5, width: 1, depth: 1 });
+    const apart = box({ id: "b", x: 5, z: 7, width: 1, depth: 1 });
+    expect(minimumClearance(room, [left, apart])).toBeCloseTo(1, 5);
+    const touching = box({ id: "b", x: 5, z: 6, width: 1, depth: 1 });
+    expect(minimumClearance(room, [left, touching])).toBe(0);
+    const overlapping = box({ id: "b", x: 5, z: 5.8, width: 1, depth: 1 });
+    expect(minimumClearance(room, [left, overlapping])).toBe(0);
+  });
+
+  it("ignores an item raised above the walking plane", () => {
+    const floor = box({ id: "a", x: 5, z: 5, width: 1, depth: 1 });
+    const high = box({ id: "b", x: 5, z: 6, width: 1, depth: 1, elevation: 1.2 });
+    const alone = minimumClearance(room, [floor]);
+    expect(minimumClearance(room, [floor, high])).toBeCloseTo(alone ?? 0, 5);
   });
 });

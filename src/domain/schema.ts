@@ -3,8 +3,10 @@ import { mToCm } from "./units";
 import {
   SCHEMA_VERSION,
   type Furniture,
+  type FurnitureItem,
   type Layout,
   type Opening,
+  type Placement,
   type Project,
   type RoomFixture,
 } from "./types";
@@ -45,10 +47,10 @@ export function validateProject(data: unknown): ValidateResult {
   if (!isRecord(data)) {
     return { ok: false, error: "データのルートはオブジェクトである必要があります。" };
   }
-  if (data.schemaVersion !== 1 && data.schemaVersion !== 2 && data.schemaVersion !== SCHEMA_VERSION) {
+  if (data.schemaVersion !== 1 && data.schemaVersion !== 2 && data.schemaVersion !== 3 && data.schemaVersion !== SCHEMA_VERSION) {
     return {
       ok: false,
-      error: `schemaVersion は 1、2 または ${SCHEMA_VERSION} である必要があります（受信: ${preview(data.schemaVersion)}）。このバージョンのアプリでは読み込めません。`,
+      error: `schemaVersion は 1、2、3 または ${SCHEMA_VERSION} である必要があります（受信: ${preview(data.schemaVersion)}）。このバージョンのアプリでは読み込めません。`,
     };
   }
   const migrated = data.schemaVersion === SCHEMA_VERSION ? data : migrateToCurrent(data);
@@ -59,6 +61,10 @@ export function validateProject(data: unknown): ValidateResult {
   const roomError = validateRoom(migrated.room);
   if (roomError) return { ok: false, error: roomError };
 
+  const catalogError = validateCatalog(migrated.furniture);
+  if (catalogError) return { ok: false, error: catalogError };
+  const catalogIds = new Set((migrated.furniture as FurnitureItem[]).map((item) => item.id));
+
   if (!Array.isArray(migrated.layouts) || migrated.layouts.length === 0) {
     return { ok: false, error: "layouts は1件以上の配列である必要があります。" };
   }
@@ -67,7 +73,7 @@ export function validateProject(data: unknown): ValidateResult {
   }
   const layoutIds = new Set<string>();
   for (let i = 0; i < migrated.layouts.length; i++) {
-    const err = validateLayout(migrated.layouts[i], i);
+    const err = validateLayout(migrated.layouts[i], i, catalogIds);
     if (err) return { ok: false, error: err };
     const id = (migrated.layouts[i] as Layout).id;
     if (layoutIds.has(id)) return { ok: false, error: `レイアウト id「${id}」が重複しています。` };
@@ -76,13 +82,15 @@ export function validateProject(data: unknown): ValidateResult {
   if (typeof migrated.activeLayoutId !== "string" || !layoutIds.has(migrated.activeLayoutId)) {
     return { ok: false, error: "activeLayoutId が layouts のいずれかの id と一致しません。" };
   }
+  if (typeof migrated.baselineLayoutId !== "string" || !layoutIds.has(migrated.baselineLayoutId)) {
+    return { ok: false, error: "baselineLayoutId が layouts のいずれかの id と一致しません。" };
+  }
 
   return { ok: true, project: migrated as unknown as Project };
 }
 
 function migrateToCurrent(data: Record<string, unknown>): Record<string, unknown> {
   const copy = structuredClone(data);
-  copy.schemaVersion = SCHEMA_VERSION;
   if (isRecord(copy.room) && !Array.isArray(copy.room.fixtures)) copy.room.fixtures = [];
   if (Array.isArray(copy.layouts)) {
     for (const layout of copy.layouts) {
@@ -94,7 +102,101 @@ function migrateToCurrent(data: Record<string, unknown>): Record<string, unknown
       }
     }
   }
-  return copy;
+  return splitCatalog(copy);
+}
+
+function sameCatalog(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+  if (a.name !== b.name || a.shape !== b.shape) return false;
+  if (typeof a.color !== "string" || typeof b.color !== "string") return false;
+  if (a.color.toLowerCase() !== b.color.toLowerCase()) return false;
+  for (const key of ["width", "depth", "height"] as const) {
+    if (!isFiniteNumber(a[key]) || !isFiniteNumber(b[key])) return false;
+    if (Math.abs(a[key] - b[key]) > 1e-6) return false;
+  }
+  return true;
+}
+
+function uniqueSplitId(base: string, used: Set<string>): string {
+  for (let n = 2; n < 1000; n++) {
+    const candidate = `${base}#${n}`.slice(0, 80);
+    if (!used.has(candidate)) return candidate;
+  }
+  const fallback = `split-${used.size + 1}`.slice(0, 80);
+  return used.has(fallback) ? `split-${Date.now()}`.slice(0, 80) : fallback;
+}
+
+function catalogRecord(raw: Record<string, unknown>, id: string, originId: string | undefined): Record<string, unknown> {
+  const item: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (key === "x" || key === "z" || key === "rotation" || key === "elevation" || key === "allowOverlapIds" || key === "furnitureId") {
+      continue;
+    }
+    item[key] = value;
+  }
+  item.id = id;
+  if (originId) item.originId = originId;
+  return item;
+}
+
+function splitCatalog(data: Record<string, unknown>): Record<string, unknown> {
+  const layoutsIn = Array.isArray(data.layouts) ? data.layouts : [];
+  const catalog: Record<string, unknown>[] = [];
+  const byId = new Map<string, Record<string, unknown>>();
+  const used = new Set<string>();
+  const layouts: unknown[] = [];
+  for (const layout of layoutsIn) {
+    if (!isRecord(layout) || !Array.isArray(layout.furniture)) {
+      layouts.push(layout);
+      continue;
+    }
+    const idMap = new Map<string, string>();
+    const placements: Record<string, unknown>[] = [];
+    for (const raw of layout.furniture) {
+      if (!isRecord(raw) || typeof raw.id !== "string") continue;
+      const existing = byId.get(raw.id);
+      let catalogId = raw.id;
+      if (existing && !sameCatalog(existing, raw)) {
+        catalogId = uniqueSplitId(raw.id, used);
+        const created = catalogRecord(raw, catalogId, raw.id);
+        catalog.push(created);
+        byId.set(catalogId, created);
+        used.add(catalogId);
+      } else if (!existing) {
+        const created = catalogRecord(raw, raw.id, undefined);
+        catalog.push(created);
+        byId.set(raw.id, created);
+        used.add(raw.id);
+      }
+      idMap.set(raw.id, catalogId);
+      placements.push({
+        furnitureId: catalogId,
+        x: raw.x,
+        z: raw.z,
+        rotation: raw.rotation,
+        elevation: raw.elevation ?? 0,
+        allowOverlapIds: Array.isArray(raw.allowOverlapIds) ? [...raw.allowOverlapIds] : [],
+      });
+    }
+    for (const placement of placements) {
+      if (!Array.isArray(placement.allowOverlapIds)) continue;
+      placement.allowOverlapIds = placement.allowOverlapIds.map((id) =>
+        typeof id === "string" && idMap.has(id) ? idMap.get(id) : id,
+      );
+    }
+    const rest: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(layout)) {
+      if (key !== "furniture") rest[key] = value;
+    }
+    layouts.push({ ...rest, placements });
+  }
+  const active = typeof data.activeLayoutId === "string" ? data.activeLayoutId : "";
+  return {
+    ...data,
+    schemaVersion: SCHEMA_VERSION,
+    furniture: catalog,
+    layouts,
+    baselineLayoutId: active,
+  };
 }
 
 function validateRoom(value: unknown): string | null {
@@ -189,49 +291,28 @@ function validateOpening(value: unknown, index: number, outlineLength: number): 
   return null;
 }
 
-function validateLayout(value: unknown, index: number): string | null {
-  const label = `layouts[${index}]`;
-  if (!isRecord(value)) return `${label} はオブジェクトである必要があります。`;
-  const idError = checkId(value.id, `${label}.id`);
-  if (idError) return idError;
-  const nameError = checkName(value.name, `${label} の名前`);
-  if (nameError) return nameError;
-  if (!Array.isArray(value.furniture)) return `${label}.furniture は配列である必要があります。`;
-  if (value.furniture.length > 200) return `${label} の家具が多すぎます（上限 200）。`;
-    const ids = new Set<string>();
-  for (let i = 0; i < value.furniture.length; i++) {
-    const err = validateFurniture(value.furniture[i], `${label}.furniture[${i}]`);
+function validateCatalog(value: unknown): string | null {
+  if (!Array.isArray(value)) return "furniture は配列である必要があります。";
+  if (value.length > 10000) return "furniture が多すぎます（上限 10000）。";
+  const ids = new Set<string>();
+  for (let i = 0; i < value.length; i++) {
+    const err = validateCatalogItem(value[i], `furniture[${i}]`);
     if (err) return err;
-    const id = (value.furniture[i] as Furniture).id;
-    if (ids.has(id)) return `家具 id「${id}」が同じレイアウト内で重複しています。`;
+    const id = (value[i] as FurnitureItem).id;
+    if (ids.has(id)) return `家具 id「${id}」が重複しています。`;
     ids.add(id);
   }
-  for (let i = 0; i < value.furniture.length; i++) {
-    const item = value.furniture[i] as Furniture;
-    const err = validateAllowList(item, ids, `${label}.furniture[${i}]`);
-    if (err) return err;
-  }
   return null;
 }
 
-function validateAllowList(item: Furniture, ids: Set<string>, label: string): string | null {
-  if (item.allowOverlapIds === undefined) return null;
-  if (!Array.isArray(item.allowOverlapIds)) return `${label} の重なってもいい家具は id の配列である必要があります。`;
-  const seen = new Set<string>();
-  for (const id of item.allowOverlapIds) {
-    if (typeof id !== "string" || !ids.has(id) || id === item.id) {
-      return `${label} の重なってもいい家具に、同じレイアウトの他の家具ではない id があります。`;
-    }
-    if (seen.has(id)) return `${label} の重なってもいい家具が重複しています。`;
-    seen.add(id);
-  }
-  return null;
-}
-
-function validateFurniture(value: unknown, label: string): string | null {
+function validateCatalogItem(value: unknown, label: string): string | null {
   if (!isRecord(value)) return `${label} はオブジェクトである必要があります。`;
   const idError = checkId(value.id, `${label}.id`);
   if (idError) return idError;
+  if (value.originId !== undefined) {
+    const originError = checkId(value.originId, `${label}.originId`);
+    if (originError) return originError;
+  }
   const nameError = checkName(value.name, `${label} の名前`);
   if (nameError) return nameError;
   if (typeof value.shape !== "string" || !KNOWN_SHAPES.has(value.shape)) {
@@ -246,6 +327,55 @@ function validateFurniture(value: unknown, label: string): string | null {
   if (value.shape === "cylinder" && Math.abs((value.width as number) - (value.depth as number)) > 0.0001) {
     return `${label} は円柱なので奥行きは直径と一致している必要があります。`;
   }
+  if (typeof value.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(value.color)) {
+    return `${label} の色は #rrggbb 形式である必要があります。`;
+  }
+  return null;
+}
+
+function validateLayout(value: unknown, index: number, catalogIds: Set<string>): string | null {
+  const label = `layouts[${index}]`;
+  if (!isRecord(value)) return `${label} はオブジェクトである必要があります。`;
+  const idError = checkId(value.id, `${label}.id`);
+  if (idError) return idError;
+  const nameError = checkName(value.name, `${label} の名前`);
+  if (nameError) return nameError;
+  if (!Array.isArray(value.placements)) return `${label}.placements は配列である必要があります。`;
+  if (value.placements.length > 200) return `${label} の家具が多すぎます（上限 200）。`;
+  const ids = new Set<string>();
+  for (let i = 0; i < value.placements.length; i++) {
+    const err = validatePlacement(value.placements[i], `${label}.placements[${i}]`, catalogIds);
+    if (err) return err;
+    const id = (value.placements[i] as Placement).furnitureId;
+    if (ids.has(id)) return `家具 id「${id}」が同じレイアウト内で重複しています。`;
+    ids.add(id);
+  }
+  for (let i = 0; i < value.placements.length; i++) {
+    const placement = value.placements[i] as Placement;
+    const err = validateAllowList(placement.allowOverlapIds, ids, placement.furnitureId, `${label}.placements[${i}]`);
+    if (err) return err;
+  }
+  return null;
+}
+
+function validateAllowList(value: unknown, ids: Set<string>, selfId: string, label: string): string | null {
+  if (!Array.isArray(value)) return `${label} の重なってもいい家具は id の配列である必要があります。`;
+  const seen = new Set<string>();
+  for (const id of value) {
+    if (typeof id !== "string" || !ids.has(id) || id === selfId) {
+      return `${label} の重なってもいい家具に、同じレイアウトの他の家具ではない id があります。`;
+    }
+    if (seen.has(id)) return `${label} の重なってもいい家具が重複しています。`;
+    seen.add(id);
+  }
+  return null;
+}
+
+function validatePlacement(value: unknown, label: string, catalogIds: Set<string>): string | null {
+  if (!isRecord(value)) return `${label} はオブジェクトである必要があります。`;
+  if (typeof value.furnitureId !== "string" || !catalogIds.has(value.furnitureId)) {
+    return `${label} の furnitureId が家具一覧にありません。`;
+  }
   const xError = checkPosition(value.x, `${label} の X`);
   if (xError) return xError;
   const zError = checkPosition(value.z, `${label} の Z`);
@@ -253,16 +383,8 @@ function validateFurniture(value: unknown, label: string): string | null {
   if (!isFiniteNumber(value.rotation) || Math.abs(value.rotation) > 36000) {
     return `${label} の回転角は有限な数値である必要があります。`;
   }
-  if (typeof value.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(value.color)) {
-    return `${label} の色は #rrggbb 形式である必要があります。`;
-  }
-  if (value.elevation !== undefined) {
-    if (typeof value.elevation === "number" && Number.isNaN(value.elevation)) {
-      return `${label} の底の高さが NaN です。`;
-    }
-    if (!isFiniteNumber(value.elevation) || value.elevation < 0 || value.elevation > 20) {
-      return `${label} の底の高さは 0〜${mToCm(20)}cm の範囲で指定してください。`;
-    }
+  if (!isFiniteNumber(value.elevation) || value.elevation < 0 || value.elevation > 20) {
+    return `${label} の底の高さは 0〜${mToCm(20)}cm の範囲で指定してください。`;
   }
   return null;
 }
@@ -439,6 +561,26 @@ export function activeLayout(project: Project): Layout {
   return layout;
 }
 
+export function resolveLayout(project: Project, layoutId: string): Furniture[] {
+  const layout = project.layouts.find((item) => item.id === layoutId);
+  if (!layout) return [];
+  const byId = new Map(project.furniture.map((item) => [item.id, item]));
+  const resolved: Furniture[] = [];
+  for (const placement of layout.placements) {
+    const item = byId.get(placement.furnitureId);
+    if (!item) continue;
+    resolved.push({
+      ...item,
+      x: placement.x,
+      z: placement.z,
+      rotation: placement.rotation,
+      elevation: placement.elevation,
+      allowOverlapIds: placement.allowOverlapIds,
+    });
+  }
+  return resolved;
+}
+
 export function activeFurniture(project: Project): Furniture[] {
-  return activeLayout(project).furniture;
+  return resolveLayout(project, project.activeLayoutId);
 }

@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { analyzeLayout } from "../domain/geometry";
 import { FixturesSection } from "./FixturesSection";
 import { activeFurniture, LIMITS } from "../domain/schema";
@@ -20,6 +20,9 @@ export function Inspector() {
   const setWallsTransparent = useEditor((s) => s.setWallsTransparent);
   const beginGesture = useEditor((s) => s.beginGesture);
   const endGesture = useEditor((s) => s.endGesture);
+  const compareLayoutId = useEditor((s) => s.compareLayoutId);
+  const deleteFurniture = useEditor((s) => s.deleteFurniture);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
 
   const furniture = activeFurniture(project);
   const selected = furniture.find((item) => item.id === selectedId) ?? null;
@@ -89,8 +92,9 @@ export function Inspector() {
         <div className="panel-head">
           <h2>選択中の家具</h2>
         </div>
-        {!selected && <p className="hint">一覧から家具を選ぶと、寸法と位置を cm で編集できます。</p>}
-        {selected && (
+        {compareLayoutId && <p className="hint">比較中は閲覧のみです。図の「この案を編集」で戻れます。</p>}
+        {!compareLayoutId && !selected && <p className="hint">一覧から家具を選ぶと、寸法と位置を cm で編集できます。</p>}
+        {!compareLayoutId && selected && (
           <>
             <NameField
               label="名前"
@@ -135,6 +139,9 @@ export function Inspector() {
               testId="dim-height"
               onPreview={(height) => updateFurniture(selected.id, { height }, "preview")}
             />
+            <p className="hint" data-testid="shared-note">
+              名前・色・寸法・形状は全部の案に共通
+            </p>
             <NumberField
               label="位置 X（中心）"
               valueM={selected.x}
@@ -159,6 +166,7 @@ export function Inspector() {
               testId="item-elevation"
               onPreview={(elevation) => updateFurniture(selected.id, { elevation }, "preview")}
             />
+            <p className="hint">底の高さと重なりの許可は、この案だけです。</p>
             <div className="rotation-row">
               <span>回転 {normalizeDegrees(selected.rotation).toFixed(0)}°</span>
               <button type="button" onClick={() => rotateBy(selected.id, -90)}>
@@ -248,10 +256,47 @@ export function Inspector() {
               <button type="button" onClick={() => duplicate(selected.id)}>
                 複製
               </button>
-              <button type="button" className="danger" onClick={() => remove(selected.id)}>
-                削除
+              <button type="button" data-testid="remove-from-layout" onClick={() => remove(selected.id)}>
+                この案から外す
               </button>
             </div>
+            <div className="list-actions">
+              <button
+                type="button"
+                className="danger"
+                data-testid="delete-furniture"
+                onClick={() => setConfirmingDelete(true)}
+              >
+                家具を消す
+              </button>
+            </div>
+            {confirmingDelete && (
+              <div className="warn" role="dialog" data-testid="delete-furniture-dialog">
+                <p data-testid="delete-furniture-impact">
+                  「{selected.name}」を家具そのものとして消します。次の案からなくなります：
+                  {project.layouts
+                    .filter((layout) => layout.placements.some((placement) => placement.furnitureId === selected.id))
+                    .map((layout) => layout.name)
+                    .join("、")}
+                  。
+                </p>
+                <div className="list-actions">
+                  <button
+                    type="button"
+                    data-testid="delete-furniture-confirm"
+                    onClick={() => {
+                      deleteFurniture(selected.id);
+                      setConfirmingDelete(false);
+                    }}
+                  >
+                    消す
+                  </button>
+                  <button type="button" onClick={() => setConfirmingDelete(false)}>
+                    キャンセル
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </section>
