@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createInitialProject } from "./initial";
 import { parseProjectJson, validateProject } from "./schema";
+import { serializeProject } from "./storage";
 import type { FurnitureItem, Project } from "./types";
 
 function legacyDocument(version: 1 | 2 | 3) {
@@ -50,6 +51,23 @@ describe("import validation", () => {
       expect(bed.note).toBe("将来用");
       expect(result.project).toBe(project);
     }
+  });
+
+  it("round-trips a version 4 project through export and import", () => {
+    const once = parseProjectJson(serializeProject(sample()));
+    expect(once.ok).toBe(true);
+    if (!once.ok) return;
+    expect(once.project.schemaVersion).toBe(4);
+    expect(once.project.furniture.map((item) => item.id)).toEqual(["bed", "desk", "sofa", "table"]);
+    expect(once.project.layouts[0].placements.map((placement) => placement.furnitureId)).toEqual([
+      "bed",
+      "desk",
+      "sofa",
+      "table",
+    ]);
+    const twice = parseProjectJson(serializeProject(once.project));
+    expect(twice.ok).toBe(true);
+    if (twice.ok) expect(twice.project).toEqual(once.project);
   });
 
   it("rejects malformed JSON", () => {
