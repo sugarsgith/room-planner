@@ -9,6 +9,8 @@ import {
   type Placement,
   type Project,
   type RoomFixture,
+  type StorageSpace,
+  type StoredItem,
 } from "./types";
 
 export const LIMITS = {
@@ -47,10 +49,16 @@ export function validateProject(data: unknown): ValidateResult {
   if (!isRecord(data)) {
     return { ok: false, error: "データのルートはオブジェクトである必要があります。" };
   }
-  if (data.schemaVersion !== 1 && data.schemaVersion !== 2 && data.schemaVersion !== 3 && data.schemaVersion !== SCHEMA_VERSION) {
+  if (
+    data.schemaVersion !== 1 &&
+    data.schemaVersion !== 2 &&
+    data.schemaVersion !== 3 &&
+    data.schemaVersion !== 4 &&
+    data.schemaVersion !== SCHEMA_VERSION
+  ) {
     return {
       ok: false,
-      error: `schemaVersion は 1、2、3 または ${SCHEMA_VERSION} である必要があります（受信: ${preview(data.schemaVersion)}）。このバージョンのアプリでは読み込めません。`,
+      error: `schemaVersion は 1、2、3、4 または ${SCHEMA_VERSION} である必要があります（受信: ${preview(data.schemaVersion)}）。このバージョンのアプリでは読み込めません。`,
     };
   }
   const migrated = data.schemaVersion === SCHEMA_VERSION ? data : migrateToCurrent(data);
@@ -63,7 +71,15 @@ export function validateProject(data: unknown): ValidateResult {
 
   const catalogError = validateCatalog(migrated.furniture);
   if (catalogError) return { ok: false, error: catalogError };
-  const catalogIds = new Set((migrated.furniture as FurnitureItem[]).map((item) => item.id));
+  const catalog = migrated.furniture as FurnitureItem[];
+  const catalogIds = new Set(catalog.map((item) => item.id));
+  const allSpaces = catalog.flatMap((item) => item.spaces ?? []);
+  const spaceIds = new Set(allSpaces.map((space) => space.id));
+  if (spaceIds.size !== allSpaces.length) {
+    return { ok: false, error: "収納スペースの id が家具をまたいで重複しています。" };
+  }
+  const storedError = validateStoredItems(migrated.storedItems, spaceIds);
+  if (storedError) return { ok: false, error: storedError };
 
   if (!Array.isArray(migrated.layouts) || migrated.layouts.length === 0) {
     return { ok: false, error: "layouts は1件以上の配列である必要があります。" };
@@ -91,6 +107,7 @@ export function validateProject(data: unknown): ValidateResult {
 
 function migrateToCurrent(data: Record<string, unknown>): Record<string, unknown> {
   const copy = structuredClone(data);
+  if (copy.schemaVersion === 4) return ensureStorage(copy);
   if (isRecord(copy.room) && !Array.isArray(copy.room.fixtures)) copy.room.fixtures = [];
   if (Array.isArray(copy.layouts)) {
     for (const layout of copy.layouts) {
@@ -102,7 +119,18 @@ function migrateToCurrent(data: Record<string, unknown>): Record<string, unknown
       }
     }
   }
-  return splitCatalog(copy);
+  return ensureStorage(splitCatalog(copy));
+}
+
+function ensureStorage(data: Record<string, unknown>): Record<string, unknown> {
+  data.schemaVersion = SCHEMA_VERSION;
+  if (!Array.isArray(data.storedItems)) data.storedItems = [];
+  if (Array.isArray(data.furniture)) {
+    for (const item of data.furniture) {
+      if (isRecord(item) && !Array.isArray(item.spaces)) item.spaces = [];
+    }
+  }
+  return data;
 }
 
 function sameCatalog(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
@@ -329,6 +357,66 @@ function validateCatalogItem(value: unknown, label: string): string | null {
   }
   if (typeof value.color !== "string" || !/^#[0-9a-fA-F]{6}$/.test(value.color)) {
     return `${label} の色は #rrggbb 形式である必要があります。`;
+  }
+  if (!Array.isArray(value.spaces)) return `${label}.spaces は配列である必要があります。`;
+  if (value.spaces.length > 40) return `${label} の収納スペースが多すぎます（上限 40）。`;
+  const spaceIds = new Set<string>();
+  for (let i = 0; i < value.spaces.length; i++) {
+    const err = validateSpace(value.spaces[i], `${label}.spaces[${i}]`);
+    if (err) return err;
+    const id = (value.spaces[i] as StorageSpace).id;
+    if (spaceIds.has(id)) return `収納スペース id「${id}」が重複しています。`;
+    spaceIds.add(id);
+  }
+  return null;
+}
+
+function validateSpace(value: unknown, label: string): string | null {
+  if (!isRecord(value)) return `${label} はオブジェクトである必要があります。`;
+  const idError = checkId(value.id, `${label}.id`);
+  if (idError) return idError;
+  const nameError = checkName(value.name, `${label} の名前`);
+  if (nameError) return nameError;
+  const widthError = checkPositive(value.width, LIMITS.furniture, `${label} の幅`);
+  if (widthError) return widthError;
+  const depthError = checkPositive(value.depth, LIMITS.furniture, `${label} の奥行き`);
+  if (depthError) return depthError;
+  const heightError = checkPositive(value.height, LIMITS.furniture, `${label} の高さ`);
+  if (heightError) return heightError;
+  if (typeof value.note !== "string" || value.note.length > 200) {
+    return `${label} のメモは200文字以内である必要があります。`;
+  }
+  return null;
+}
+
+function validateStoredItems(value: unknown, spaceIds: Set<string>): string | null {
+  if (!Array.isArray(value)) return "storedItems は配列である必要があります。";
+  if (value.length > 2000) return "収納物が多すぎます（上限 2000）。";
+  const ids = new Set<string>();
+  for (let i = 0; i < value.length; i++) {
+    const err = validateStoredItem(value[i], `storedItems[${i}]`, spaceIds);
+    if (err) return err;
+    const id = (value[i] as StoredItem).id;
+    if (ids.has(id)) return `収納物 id「${id}」が重複しています。`;
+    ids.add(id);
+  }
+  return null;
+}
+
+function validateStoredItem(value: unknown, label: string, spaceIds: Set<string>): string | null {
+  if (!isRecord(value)) return `${label} はオブジェクトである必要があります。`;
+  const idError = checkId(value.id, `${label}.id`);
+  if (idError) return idError;
+  const nameError = checkName(value.name, `${label} の名前`);
+  if (nameError) return nameError;
+  if (!Number.isInteger(value.quantity) || (value.quantity as number) < 1 || (value.quantity as number) > 9999) {
+    return `${label} の数量は 1〜9999 の整数である必要があります。`;
+  }
+  if (typeof value.spaceId !== "string" || !spaceIds.has(value.spaceId)) {
+    return `${label} の保管場所が見つかりません。`;
+  }
+  if (typeof value.note !== "string" || value.note.length > 200) {
+    return `${label} のメモは200文字以内である必要があります。`;
   }
   return null;
 }

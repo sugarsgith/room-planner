@@ -6,6 +6,8 @@ export const STORAGE_KEY = "room-planner.project.v1";
 export const BACKUP_KEY = "room-planner.project.v1.backup";
 /** One-time copy of the pre-v4 document. Never overwritten once present. */
 export const V3_BACKUP_KEY = "room-planner.project.v3.backup";
+/** One-time copy of the pre-v5 document. Does not replace the v3 backup. */
+export const V4_BACKUP_KEY = "room-planner.project.v4.backup";
 
 export interface KeyValueStorage {
   getItem(key: string): string | null;
@@ -26,6 +28,8 @@ export interface LoadResult {
    * The caller must write it to V3_BACKUP_KEY before the first v4 save.
    */
   legacyRaw?: string;
+  /** Untouched v4 text, written once to V4_BACKUP_KEY before the first v5 save. */
+  legacyV4Raw?: string;
 }
 
 /**
@@ -60,16 +64,20 @@ export function loadProject(storage: KeyValueStorage): LoadResult {
       raw,
     };
   }
-  const legacyRaw = isPreV4(raw) ? raw : undefined;
-  return { status: "ok", project: parsed.project, legacyRaw };
+  const version = schemaVersionOf(raw);
+  return {
+    status: "ok",
+    project: parsed.project,
+    legacyRaw: version === 1 || version === 2 || version === 3 ? raw : undefined,
+    legacyV4Raw: version === 4 ? raw : undefined,
+  };
 }
 
-function isPreV4(raw: string): boolean {
+function schemaVersionOf(raw: string): unknown {
   try {
-    const version = (JSON.parse(raw) as { schemaVersion?: unknown }).schemaVersion;
-    return version === 1 || version === 2 || version === 3;
+    return (JSON.parse(raw) as { schemaVersion?: unknown }).schemaVersion;
   } catch {
-    return false;
+    return undefined;
   }
 }
 
@@ -78,23 +86,31 @@ function isPreV4(raw: string): boolean {
  * first if that key is empty. A failed backup write skips the v4 write.
  * An existing backup is left as-is.
  */
-export function saveProject(storage: KeyValueStorage, project: Project, legacyRaw?: string | null): void {
-  if (legacyRaw) {
-    let existing: string | null;
-    try {
-      existing = storage.getItem(V3_BACKUP_KEY);
-    } catch {
-      throw new Error("backup-read-failed");
-    }
-    if (existing === null) {
-      try {
-        storage.setItem(V3_BACKUP_KEY, legacyRaw);
-      } catch {
-        throw new Error("backup-write-failed");
-      }
-    }
-  }
+export function saveProject(
+  storage: KeyValueStorage,
+  project: Project,
+  legacyRaw?: string | null,
+  legacyV4Raw?: string | null,
+): void {
+  writeBackupOnce(storage, V3_BACKUP_KEY, legacyRaw);
+  writeBackupOnce(storage, V4_BACKUP_KEY, legacyV4Raw);
   storage.setItem(STORAGE_KEY, JSON.stringify(project));
+}
+
+function writeBackupOnce(storage: KeyValueStorage, key: string, raw?: string | null): void {
+  if (!raw) return;
+  let existing: string | null;
+  try {
+    existing = storage.getItem(key);
+  } catch {
+    throw new Error("backup-read-failed");
+  }
+  if (existing !== null) return;
+  try {
+    storage.setItem(key, raw);
+  } catch {
+    throw new Error("backup-write-failed");
+  }
 }
 
 export function serializeProject(project: Project): string {

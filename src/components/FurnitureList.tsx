@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { analyzeLayout, issueIsActive } from "../domain/geometry";
 import { activeFurniture } from "../domain/schema";
 import { formatCm } from "../domain/units";
+import { StorageIndex } from "./StorageSection";
 import { useEditor } from "../state/store";
 
 export function FurnitureList() {
@@ -59,6 +60,7 @@ export function FurnitureList() {
           円柱を追加
         </button>
       </div>
+      <StorageIndex />
     </aside>
   );
 }

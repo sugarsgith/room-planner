@@ -1,11 +1,12 @@
 /**
- * Project file schema v4.
+ * Project file schema v5.
  * Internal lengths are meters. Every length in the UI is centimeters (0.1 cm).
- * Versions 1, 2, and 3 migrate on load. Furniture identity lives in `furniture`;
- * each layout stores placements only. See AGENTS.md for the coordinate system.
+ * Versions 1 through 4 migrate on load. Furniture identity lives in `furniture`;
+ * each layout stores placements only. Storage spaces live on the catalog item.
+ * See AGENTS.md for the coordinate system.
  */
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export interface Vec2 {
   /** Meters, room X (width axis). */
@@ -148,6 +149,26 @@ export type RoomFixture = PillarFixture | StorageFixture | BeamFixture | WindowF
 /** Box uses width x depth. Cylinder uses width as the diameter; depth must equal width. */
 export type FurnitureShape = "box" | "cylinder";
 
+/** Interior of a catalog item. Not a placement, so it survives a move. */
+export interface StorageSpace {
+  id: string;
+  name: string;
+  /** Interior size in meters. */
+  width: number;
+  depth: number;
+  height: number;
+  note: string;
+}
+
+/** Something kept in one storage space. */
+export interface StoredItem {
+  id: string;
+  name: string;
+  quantity: number;
+  spaceId: string;
+  note: string;
+}
+
 /** Shared across every layout. Position is not stored here. */
 export interface FurnitureItem {
   id: string;
@@ -161,6 +182,8 @@ export interface FurnitureItem {
   height: number;
   /** #rrggbb */
   color: string;
+  /** Interior spaces. Omitted or empty when the item stores nothing. */
+  spaces?: StorageSpace[];
   /**
    * Present when migration split this item off an older id whose
    * dimensions disagreed. Comparison labels that pair 「別家具」.
@@ -210,6 +233,7 @@ export interface Project {
   app?: string;
   room: Room;
   furniture: FurnitureItem[];
+  storedItems: StoredItem[];
   layouts: Layout[];
   activeLayoutId: string;
   /** Editable reference arrangement. Not a lock. */
