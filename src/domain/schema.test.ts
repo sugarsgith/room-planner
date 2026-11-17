@@ -57,7 +57,7 @@ describe("import validation", () => {
     const once = parseProjectJson(serializeProject(sample()));
     expect(once.ok).toBe(true);
     if (!once.ok) return;
-    expect(once.project.schemaVersion).toBe(4);
+    expect(once.project.schemaVersion).toBe(5);
     expect(once.project.furniture.map((item) => item.id)).toEqual(["bed", "desk", "sofa", "table"]);
     expect(once.project.layouts[0].placements.map((placement) => placement.furnitureId)).toEqual([
       "bed",
@@ -77,7 +77,7 @@ describe("import validation", () => {
   });
 
   it("rejects the wrong schema version", () => {
-    for (const schemaVersion of [0, 5, "1", "2", null]) {
+    for (const schemaVersion of [0, 6, "1", "2", null]) {
       const result = validateProject({ ...sample(), schemaVersion });
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.error).toContain("schemaVersion");
@@ -91,7 +91,9 @@ describe("import validation", () => {
     const result = validateProject(legacy);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.project.schemaVersion).toBe(4);
+      expect(result.project.schemaVersion).toBe(5);
+      expect(result.project.storedItems).toEqual([]);
+      expect(result.project.furniture.every((item) => (item.spaces ?? []).length === 0)).toBe(true);
       expect(result.project.room.fixtures).toEqual([]);
       expect(result.project.baselineLayoutId).toBe("layout-default");
       expect(result.project.layouts[0].placements[0].allowOverlapIds).toEqual([]);
@@ -120,7 +122,7 @@ describe("import validation", () => {
     const result = validateProject(legacy);
     expect(result.ok).toBe(true);
     if (result.ok) {
-      expect(result.project.schemaVersion).toBe(4);
+      expect(result.project.schemaVersion).toBe(5);
       expect(result.project.room.fixtures).toHaveLength(1);
       expect(result.project.layouts[0].placements[0].allowOverlapIds).toEqual([]);
       expect(result.project.layouts[0].placements[0].x).toBe(legacy.layouts[0].furniture[0].x);
@@ -143,6 +145,23 @@ describe("import validation", () => {
     expect(split).toBeTruthy();
     expect(result.project.layouts[1].placements.find((placement) => placement.furnitureId === split!.id)).toBeTruthy();
     expect(result.project.layouts[0].placements.find((placement) => placement.furnitureId === "bed")).toBeTruthy();
+  });
+
+  it("migrates a version 4 catalog by adding empty storage", () => {
+    const current = sample();
+    const legacy = {
+      ...current,
+      schemaVersion: 4,
+      storedItems: undefined,
+      furniture: current.furniture.map(({ spaces: _spaces, ...item }) => item),
+    };
+    const result = validateProject(legacy);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.project.schemaVersion).toBe(5);
+    expect(result.project.storedItems).toEqual([]);
+    expect(result.project.furniture[0].spaces).toEqual([]);
+    expect(result.project.layouts[0].placements[0].x).toBe(current.layouts[0].placements[0].x);
   });
 
   it("rejects negative, zero, NaN, and non-finite dimensions", () => {

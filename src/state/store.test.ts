@@ -221,4 +221,26 @@ describe("editor store", () => {
     useEditor.getState().setActiveLayout(variant);
     expect(activeFurniture(useEditor.getState().project).some((item) => item.id === "table")).toBe(false);
   });
+
+  it("keeps storage when a piece moves or leaves a layout, and removes it with the furniture", () => {
+    useEditor.getState().addStorageSpace("bed", {
+      id: "under-bed",
+      name: "ベッド下",
+      width: 0.9,
+      depth: 1.9,
+      height: 0.2,
+      note: "",
+    });
+    useEditor.getState().addStoredItem({ id: "box", name: "衣装ケース", quantity: 2, spaceId: "under-bed", note: "" });
+    useEditor.getState().duplicateLayout();
+    useEditor.getState().updateFurniture("bed", { x: cmToM(100) }, "commit");
+    useEditor.getState().remove("bed");
+    expect(useEditor.getState().project.furniture.find((item) => item.id === "bed")?.spaces).toHaveLength(1);
+    expect(useEditor.getState().project.storedItems).toHaveLength(1);
+    useEditor.getState().setActiveLayout("layout-default");
+    expect(activeFurniture(useEditor.getState().project).some((item) => item.id === "bed")).toBe(true);
+    useEditor.getState().deleteFurniture("bed");
+    expect(useEditor.getState().project.furniture.some((item) => item.id === "bed")).toBe(false);
+    expect(useEditor.getState().project.storedItems).toHaveLength(0);
+  });
 });

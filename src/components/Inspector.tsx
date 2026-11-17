@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { analyzeLayout } from "../domain/geometry";
 import { FixturesSection } from "./FixturesSection";
+import { StorageSection } from "./StorageSection";
 import { activeFurniture, LIMITS } from "../domain/schema";
 import { normalizeDegrees } from "../domain/units";
 import { useEditor } from "../state/store";
@@ -252,6 +253,7 @@ export function Inspector() {
                 高さが天井を超えています。
               </p>
             )}
+            <StorageSection furnitureId={selected.id} />
             <div className="list-actions">
               <button type="button" onClick={() => duplicate(selected.id)}>
                 複製
@@ -278,7 +280,7 @@ export function Inspector() {
                     .filter((layout) => layout.placements.some((placement) => placement.furnitureId === selected.id))
                     .map((layout) => layout.name)
                     .join("、")}
-                  。
+                  。この家具の収納スペースと、そこに入っている収納物も消えます。
                 </p>
                 <div className="list-actions">
                   <button

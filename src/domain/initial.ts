@@ -30,6 +30,7 @@ export function createInitialProject(): Project {
       item("sofa", "2人掛けソファ", "box", 140, 80, 75, "#3f6b5a"),
       item("table", "丸テーブル", "cylinder", 60, 60, 70, "#c4a574"),
     ],
+    storedItems: [],
     layouts: [
       {
         id: "layout-default",
@@ -64,6 +65,7 @@ function item(
     depth: cmToM(depthCm),
     height: cmToM(heightCm),
     color,
+    spaces: [],
   };
 }
 

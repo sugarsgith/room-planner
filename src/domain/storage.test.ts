@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createInitialProject } from "./initial";
-import { BACKUP_KEY, loadProject, saveProject, STORAGE_KEY, V3_BACKUP_KEY, type KeyValueStorage } from "./storage";
+import { BACKUP_KEY, loadProject, saveProject, STORAGE_KEY, V3_BACKUP_KEY, V4_BACKUP_KEY, type KeyValueStorage } from "./storage";
 
 function memory(initial: Record<string, string> = {}): { storage: KeyValueStorage; map: Map<string, string> } {
   const map = new Map(Object.entries(initial));
@@ -63,7 +63,7 @@ describe("loadProject", () => {
     if (loaded.status !== "ok") return;
     saveProject(storage, loaded.project, loaded.legacyRaw);
     expect(map.get(V3_BACKUP_KEY)).toBe(raw);
-    expect(JSON.parse(map.get(STORAGE_KEY) ?? "{}").schemaVersion).toBe(4);
+    expect(JSON.parse(map.get(STORAGE_KEY) ?? "{}").schemaVersion).toBe(5);
 
     map.set(V3_BACKUP_KEY, "keep-me");
     saveProject(storage, loaded.project, loaded.legacyRaw);
@@ -80,6 +80,29 @@ describe("loadProject", () => {
     expect(() => saveProject(blocked.storage, again.project, again.legacyRaw)).toThrow("backup-write-failed");
     expect(blocked.map.get(STORAGE_KEY)).toBe(raw);
     expect(blocked.map.has(V3_BACKUP_KEY)).toBe(false);
+  });
+
+  it("backs up a v4 document once and does not touch the v3 backup", () => {
+    const current = createInitialProject();
+    const legacy = {
+      ...current,
+      schemaVersion: 4,
+      furniture: current.furniture.map(({ spaces: _spaces, ...item }) => item),
+    };
+    delete (legacy as { storedItems?: unknown }).storedItems;
+    const raw = JSON.stringify(legacy);
+    const { storage, map } = memory({ [STORAGE_KEY]: raw, [V3_BACKUP_KEY]: "keep-v3" });
+    const loaded = loadProject(storage);
+    expect(loaded.legacyV4Raw).toBe(raw);
+    expect(loaded.legacyRaw).toBeUndefined();
+    if (loaded.status !== "ok") return;
+    saveProject(storage, loaded.project, loaded.legacyRaw, loaded.legacyV4Raw);
+    expect(map.get(V4_BACKUP_KEY)).toBe(raw);
+    expect(map.get(V3_BACKUP_KEY)).toBe("keep-v3");
+    expect(JSON.parse(map.get(STORAGE_KEY) ?? "{}").schemaVersion).toBe(5);
+    map.set(V4_BACKUP_KEY, "keep-v4");
+    saveProject(storage, loaded.project, null, raw);
+    expect(map.get(V4_BACKUP_KEY)).toBe("keep-v4");
   });
 
   it("leaves an empty store empty", () => {

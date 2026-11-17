@@ -4,7 +4,7 @@ import { createInitialProject } from "../domain/initial";
 import { activeFurniture, activeLayout, LIMITS, parseProjectJson } from "../domain/schema";
 import { loadProject, saveProject, type KeyValueStorage, type LoadStatus } from "../domain/storage";
 import { fixtureError } from "../domain/fixtures";
-import type { Furniture, FurnitureItem, FurnitureShape, Placement, Project, Room, RoomFixture } from "../domain/types";
+import type { Furniture, FurnitureItem, FurnitureShape, Placement, Project, Room, RoomFixture, StorageSpace, StoredItem } from "../domain/types";
 import { normalizeDegrees, roundM } from "../domain/units";
 
 const HISTORY_LIMIT = 100;
@@ -40,6 +40,8 @@ export interface EditorState {
   corruptRaw: string | null;
   /** Pre-v4 text waiting for a one-time backup. Not part of undo. */
   legacyRaw: string | null;
+  /** Pre-v5 text waiting for a one-time backup. Not part of undo. */
+  legacyV4Raw: string | null;
   /** Read-only comparison against the baseline. Not part of the document. */
   compareLayoutId: string | null;
   importError: string | null;
@@ -49,6 +51,12 @@ export interface EditorState {
   duplicateLayout: () => void;
   setCompareLayout: (id: string | null) => void;
   deleteFurniture: (id: string) => void;
+  addStorageSpace: (furnitureId: string, space: StorageSpace) => void;
+  updateStorageSpace: (furnitureId: string, space: StorageSpace) => void;
+  removeStorageSpace: (furnitureId: string, spaceId: string) => void;
+  addStoredItem: (item: StoredItem) => void;
+  updateStoredItem: (item: StoredItem) => void;
+  removeStoredItem: (id: string) => void;
   setWallsVisible: (value: boolean) => void;
   setWallsTransparent: (value: boolean) => void;
   requestViewCommand: (type: ViewCommand["type"]) => void;
@@ -142,8 +150,8 @@ export const useEditor = create<EditorState>((set, get) => {
       return;
     }
     try {
-      saveProject(boundStorage, state.project, state.legacyRaw);
-      set({ saveStatus: "saved", savedAt: Date.now(), legacyRaw: null });
+      saveProject(boundStorage, state.project, state.legacyRaw, state.legacyV4Raw);
+      set({ saveStatus: "saved", savedAt: Date.now(), legacyRaw: null, legacyV4Raw: null });
     } catch {
       set({
         persistAllowed: false,
@@ -197,6 +205,7 @@ export const useEditor = create<EditorState>((set, get) => {
     loadError: null,
     corruptRaw: null,
     legacyRaw: null,
+    legacyV4Raw: null,
     compareLayoutId: null,
     importError: null,
     saveStatus: "idle",
@@ -239,9 +248,13 @@ export const useEditor = create<EditorState>((set, get) => {
       if (get().gestureBefore) get().endGesture();
       const project = get().project;
       if (!project.furniture.some((item) => item.id === id)) return;
+      const removedSpaces = new Set(
+        (project.furniture.find((item) => item.id === id)?.spaces ?? []).map((space) => space.id),
+      );
       const next: Project = {
         ...project,
         furniture: project.furniture.filter((item) => item.id !== id),
+        storedItems: project.storedItems.filter((item) => !removedSpaces.has(item.spaceId)),
         layouts: project.layouts.map((layout) => ({
           ...layout,
           placements: layout.placements
@@ -253,6 +266,55 @@ export const useEditor = create<EditorState>((set, get) => {
         })),
       };
       commitProject(next, get().selectedId === id ? null : get().selectedId);
+    },
+    addStorageSpace: (furnitureId, space) => {
+      if (get().gestureBefore) get().endGesture();
+      const project = get().project;
+      if (!project.furniture.some((item) => item.id === furnitureId)) return;
+      if (project.furniture.some((item) => (item.spaces ?? []).some((entry) => entry.id === space.id))) return;
+      commitProject(mapSpaces(project, furnitureId, (spaces) => [...spaces, space]), get().selectedId);
+    },
+    updateStorageSpace: (furnitureId, space) => {
+      if (get().gestureBefore) get().endGesture();
+      const project = get().project;
+      commitProject(
+        mapSpaces(project, furnitureId, (spaces) => spaces.map((entry) => (entry.id === space.id ? space : entry))),
+        get().selectedId,
+      );
+    },
+    removeStorageSpace: (furnitureId, spaceId) => {
+      if (get().gestureBefore) get().endGesture();
+      const project = get().project;
+      const next: Project = {
+        ...mapSpaces(project, furnitureId, (spaces) => spaces.filter((space) => space.id !== spaceId)),
+        storedItems: project.storedItems.filter((item) => item.spaceId !== spaceId),
+      };
+      commitProject(next, get().selectedId);
+    },
+    addStoredItem: (item) => {
+      if (get().gestureBefore) get().endGesture();
+      const project = get().project;
+      if (!project.furniture.some((entry) => (entry.spaces ?? []).some((space) => space.id === item.spaceId))) return;
+      if (project.storedItems.some((entry) => entry.id === item.id)) return;
+      commitProject({ ...project, storedItems: [...project.storedItems, item] }, get().selectedId);
+    },
+    updateStoredItem: (item) => {
+      if (get().gestureBefore) get().endGesture();
+      const project = get().project;
+      if (!project.storedItems.some((entry) => entry.id === item.id)) return;
+      if (!project.furniture.some((entry) => (entry.spaces ?? []).some((space) => space.id === item.spaceId))) return;
+      commitProject(
+        { ...project, storedItems: project.storedItems.map((entry) => (entry.id === item.id ? item : entry)) },
+        get().selectedId,
+      );
+    },
+    removeStoredItem: (id) => {
+      if (get().gestureBefore) get().endGesture();
+      const project = get().project;
+      commitProject(
+        { ...project, storedItems: project.storedItems.filter((item) => item.id !== id) },
+        get().selectedId,
+      );
     },
     setWallsVisible: (wallsVisible) => set({ wallsVisible }),
     setWallsTransparent: (wallsTransparent) => set({ wallsTransparent }),
@@ -342,6 +404,7 @@ export const useEditor = create<EditorState>((set, get) => {
         depth: source.depth,
         height: source.height,
         color: source.color,
+        spaces: (source.spaces ?? []).map((space) => ({ ...space, id: createId() })),
       };
       const placement: Placement = {
         furnitureId: copyId,
@@ -375,6 +438,7 @@ export const useEditor = create<EditorState>((set, get) => {
         depth: shape === "cylinder" ? diameter : 0.4,
         height: 0.5,
         color: shape === "cylinder" ? "#90a4ae" : "#8d6e63",
+        spaces: [],
       };
       const placement: Placement = {
         furnitureId: id,
@@ -496,6 +560,15 @@ export const useEditor = create<EditorState>((set, get) => {
     dismissImportError: () => set({ importError: null }),
   };
 });
+
+function mapSpaces(project: Project, furnitureId: string, fn: (spaces: StorageSpace[]) => StorageSpace[]): Project {
+  return {
+    ...project,
+    furniture: project.furniture.map((item) =>
+      item.id === furnitureId ? { ...item, spaces: fn(item.spaces ?? []) } : item,
+    ),
+  };
+}
 
 function nextVariantName(layouts: { name: string }[]): string {
   const letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
@@ -650,6 +723,7 @@ export function initEditor(storage: KeyValueStorage, options?: { autosaveDelayMs
     loadError: loaded.error ?? null,
     corruptRaw: loaded.raw ?? null,
     legacyRaw: loaded.legacyRaw ?? null,
+    legacyV4Raw: loaded.legacyV4Raw ?? null,
     compareLayoutId: null,
     importError: null,
     saveStatus: loaded.status === "ok" ? "saved" : "idle",
