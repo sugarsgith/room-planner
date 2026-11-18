@@ -13,6 +13,7 @@ import { analyzeLayout, issueIsActive } from "./domain/geometry";
 import { activeFurniture } from "./domain/schema";
 import { cmToM, formatCm } from "./domain/units";
 import { downloadText } from "./lib/download";
+import { APP_VERSION } from "./appVersion";
 import { useUpdatePrompt } from "./pwa/useUpdatePrompt";
 import { useEditor } from "./state/store";
 
@@ -138,6 +139,7 @@ export function App() {
         <span>{selected ? `選択: ${selected.name}` : "未選択"}</span>
         <span>{problemCount > 0 ? `重なり・はみ出し ${problemCount} 件` : "重なりなし"}</span>
         <span className="status-help">矢印キーで 1cm（Shift で 10cm）。ドラッグは 1 回の操作として戻せます。</span>
+        <span data-testid="app-version">版 {APP_VERSION}</span>
       </footer>
     </div>
   );

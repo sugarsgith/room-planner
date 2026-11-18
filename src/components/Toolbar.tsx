@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { APP_VERSION } from "../appVersion";
 import { parseProjectJson } from "../domain/schema";
 import { serializeProject } from "../domain/storage";
 import { downloadText } from "../lib/download";
@@ -148,6 +149,9 @@ export function Toolbar({ onExported }: { onExported: () => void }) {
         </button>
         {moreOpen && (
           <div className="more-menu" data-testid="toolbar-more-menu">
+            <p className="hint" data-testid="app-version-menu">
+              画面の版 {APP_VERSION}
+            </p>
             <button type="button" onClick={exportProject}>
               書き出し
             </button>

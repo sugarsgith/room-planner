@@ -23,20 +23,19 @@ test("a normal browser tab does not add a status-bar gap", async ({ page }) => {
 test("home-screen insets keep the header below the status bar", async ({ page }) => {
   await page.addInitScript(() => {
     Object.defineProperty(window.navigator, "standalone", { configurable: true, get: () => true });
+    Object.defineProperty(window.screen, "height", { configurable: true, get: () => window.innerHeight });
+    Object.defineProperty(window.screen, "width", { configurable: true, get: () => window.innerWidth });
   });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("./");
-  await page.evaluate(() => {
-    const style = document.documentElement.style;
-    style.setProperty("--safe-area-top", "59px");
-    style.setProperty("--safe-area-right", "0px");
-    style.setProperty("--safe-area-bottom", "34px");
-    style.setProperty("--safe-area-left", "0px");
-  });
   await expect(page.locator("html")).toHaveClass(/standalone/);
   expect(await page.locator('meta[name="viewport"]').getAttribute("content")).toContain("viewport-fit=cover");
+  await expect(page.getByTestId("app-version")).toHaveText("版 3");
   await page.getByTestId("export-reminder-later").click();
   await page.getByTestId("work-mode-storage").click();
+  await page.getByTestId("toolbar-more").click();
+  await expect(page.getByTestId("app-version-menu")).toHaveText("画面の版 3");
+  await page.getByTestId("toolbar-more").click();
 
   const toolbar = await page.locator(".toolbar").boundingBox();
   const status = await page.locator(".status").boundingBox();
@@ -46,14 +45,8 @@ test("home-screen insets keep the header below the status bar", async ({ page })
   expect(status!.y + status!.height).toBeLessThanOrEqual(844 - 34 + 1);
   await page.screenshot({ path: `${outDir}/iphone-safe-area-portrait.png` });
 
-  await page.evaluate(() => {
-    const style = document.documentElement.style;
-    style.setProperty("--safe-area-top", "0px");
-    style.setProperty("--safe-area-right", "47px");
-    style.setProperty("--safe-area-bottom", "21px");
-    style.setProperty("--safe-area-left", "47px");
-  });
   await page.setViewportSize({ width: 844, height: 390 });
+  await page.evaluate(() => window.dispatchEvent(new Event("resize")));
   const landscapeBar = await page.locator(".toolbar").boundingBox();
   const landscapeStatus = await page.locator(".status").boundingBox();
   expect(landscapeBar && landscapeStatus).toBeTruthy();
