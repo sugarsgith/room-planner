@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { APP_VERSION } from "../appVersion";
 import { parseProjectJson } from "../domain/schema";
+import { applyTopGap, effectiveTopGap, isPhoneLayout, loadTopGap, saveTopGap } from "../topGap";
 import { serializeProject } from "../domain/storage";
 import { downloadText } from "../lib/download";
 import { saveStatusLabel, useEditor } from "../state/store";
@@ -24,6 +25,10 @@ export function Toolbar({ onExported }: { onExported: () => void }) {
   const savedAt = useEditor((s) => s.savedAt);
   const fileRef = useRef<HTMLInputElement>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [standalone] = useState(() => document.documentElement.classList.contains("standalone"));
+  const [topGap, setTopGap] = useState(() =>
+    effectiveTopGap(loadTopGap(window.localStorage), document.documentElement.classList.contains("standalone"), isPhoneLayout(window)),
+  );
   const [pendingImport, setPendingImport] = useState<string | null>(null);
   const statusText = saveStatusLabel(saveStatus, savedAt);
 
@@ -152,6 +157,39 @@ export function Toolbar({ onExported }: { onExported: () => void }) {
             <p className="hint" data-testid="app-version-menu">
               画面の版 {APP_VERSION}
             </p>
+            {standalone && (
+              <div className="top-gap-control" data-testid="top-gap-control">
+                <span>上の余白</span>
+                <div className="list-actions">
+                  <button
+                    type="button"
+                    data-testid="top-gap-less"
+                    onClick={() => {
+                      const next = Math.max(0, topGap - 8);
+                      saveTopGap(window.localStorage, next);
+                      setTopGap(applyTopGap(window));
+                    }}
+                  >
+                    減らす
+                  </button>
+                  <span className="top-gap-value" data-testid="top-gap-value">
+                    {topGap}px
+                  </span>
+                  <button
+                    type="button"
+                    data-testid="top-gap-more"
+                    onClick={() => {
+                      const next = Math.min(160, topGap + 8);
+                      saveTopGap(window.localStorage, next);
+                      setTopGap(applyTopGap(window));
+                    }}
+                  >
+                    増やす
+                  </button>
+                </div>
+                <p className="hint">ホーム画面だけで、上のぼかしを避けます。0 で追加の余白はありません。</p>
+              </div>
+            )}
             <button type="button" onClick={exportProject}>
               書き出し
             </button>

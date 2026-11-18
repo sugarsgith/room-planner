@@ -11,6 +11,9 @@ test("a normal browser tab does not add a status-bar gap", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("./");
   await expect(page.locator("html")).not.toHaveClass(/standalone/);
+  await page.getByTestId("toolbar-more").click();
+  await expect(page.getByTestId("top-gap-control")).toHaveCount(0);
+  await page.getByTestId("toolbar-more").click();
   const toolbar = await page.locator(".toolbar").boundingBox();
   expect(toolbar).toBeTruthy();
   expect(toolbar!.y).toBeLessThan(16);
@@ -30,26 +33,34 @@ test("home-screen insets keep the header below the status bar", async ({ page })
   await page.goto("./");
   await expect(page.locator("html")).toHaveClass(/standalone/);
   expect(await page.locator('meta[name="viewport"]').getAttribute("content")).toContain("viewport-fit=cover");
-  await expect(page.getByTestId("app-version")).toHaveText("版 3");
+  await expect(page.getByTestId("app-version")).toHaveText("版 4");
   await page.getByTestId("export-reminder-later").click();
   await page.getByTestId("work-mode-storage").click();
   await page.getByTestId("toolbar-more").click();
-  await expect(page.getByTestId("app-version-menu")).toHaveText("画面の版 3");
+  await expect(page.getByTestId("app-version-menu")).toHaveText("画面の版 4");
+  await expect(page.getByTestId("top-gap-value")).toHaveText("56px");
   await page.getByTestId("toolbar-more").click();
 
   const toolbar = await page.locator(".toolbar").boundingBox();
   const status = await page.locator(".status").boundingBox();
   expect(toolbar && status).toBeTruthy();
-  expect(toolbar!.y).toBeGreaterThanOrEqual(59);
-  expect(toolbar!.y).toBeLessThan(59 + 8);
+  expect(toolbar!.y).toBeGreaterThanOrEqual(59 + 56);
+  expect(toolbar!.y).toBeLessThan(59 + 56 + 8);
   expect(status!.y + status!.height).toBeLessThanOrEqual(844 - 34 + 1);
   await page.screenshot({ path: `${outDir}/iphone-safe-area-portrait.png` });
+  await page.getByTestId("toolbar-more").click();
+  await page.getByTestId("top-gap-more").click();
+  const raised = await page.locator(".toolbar").boundingBox();
+  expect(raised!.y).toBeGreaterThanOrEqual((toolbar!.y ?? 0) + 8);
+  await page.getByTestId("top-gap-less").evaluate((el: HTMLButtonElement) => el.click());
+  await page.getByTestId("toolbar-more").evaluate((el: HTMLButtonElement) => el.click());
 
   await page.setViewportSize({ width: 844, height: 390 });
   await page.evaluate(() => window.dispatchEvent(new Event("resize")));
   const landscapeBar = await page.locator(".toolbar").boundingBox();
   const landscapeStatus = await page.locator(".status").boundingBox();
   expect(landscapeBar && landscapeStatus).toBeTruthy();
+  expect(landscapeBar!.y).toBeGreaterThanOrEqual(56);
   expect(landscapeBar!.x).toBeGreaterThanOrEqual(47);
   expect(landscapeBar!.x + landscapeBar!.width).toBeLessThanOrEqual(844 - 47 + 1);
   expect(landscapeStatus!.y + landscapeStatus!.height).toBeLessThanOrEqual(390 - 21 + 1);
