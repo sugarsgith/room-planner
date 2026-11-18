@@ -1,3 +1,5 @@
+import { applyTopGap } from "./topGap";
+
 /** Used when iOS draws under the status bar but reports a 0 top inset. */
 export const STANDALONE_TOP_FALLBACK_PX = 59;
 /** Home indicator when the web view is full-bleed and the bottom inset is 0. */
@@ -105,9 +107,11 @@ export function applyStandaloneFallback(win: Window = window): void {
   if (!isStandaloneWindow(win)) {
     root.classList.remove("standalone");
     applyPadding(root.style, NONE);
+    win.document.documentElement.style.removeProperty("--top-gap");
     return;
   }
   root.classList.add("standalone");
+  applyTopGap(win);
   applyPadding(
     root.style,
     fallbackPadding({

@@ -30,7 +30,7 @@ export default defineConfig({
         ],
       },
       workbox: {
-        cacheId: "room-planner-v3",
+        cacheId: "room-planner-v4",
         globPatterns: ["**/*.{js,css,html,svg,png,webmanifest,ico}"],
         cleanupOutdatedCaches: true,
         skipWaiting: false,

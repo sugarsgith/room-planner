@@ -36,7 +36,7 @@ test("manifest and service worker are available in the production build", async 
   expect(html).toContain("viewport-fit=cover");
   expect(html).toContain('name="apple-mobile-web-app-status-bar-style" content="default"');
   const sw = await (await page.request.get("./sw.js")).text();
-  expect(sw).toContain("room-planner-v3");
+  expect(sw).toContain("room-planner-v4");
   expect(await page.locator('meta[name="viewport"]').getAttribute("content")).toBe(
     "width=device-width, initial-scale=1",
   );
