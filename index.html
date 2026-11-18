@@ -2,11 +2,16 @@
 <html lang="ja">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!--
+      viewport-fit=cover must be in this tag as first parsed. iOS ignores it
+      when a script adds it later, and then safe-area-inset-top stays 0, so the
+      home-screen header sits under the status bar. Safari tabs drop cover below.
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="description" content="自分の部屋を実寸で再現して家具配置を検討するツール" />
     <meta name="theme-color" content="#f4f0e8" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="部屋プランナー" />
     <title>部屋プランナー</title>
     <link rel="icon" href="./favicon-32.png" sizes="32x32" type="image/png" />
@@ -17,9 +22,12 @@
         var standalone =
           window.matchMedia("(display-mode: standalone)").matches ||
           window.navigator.standalone === true;
-        if (!standalone) return;
-        document.documentElement.classList.add("standalone");
         var meta = document.querySelector('meta[name="viewport"]');
+        if (!standalone) {
+          if (meta) meta.setAttribute("content", "width=device-width, initial-scale=1");
+          return;
+        }
+        document.documentElement.classList.add("standalone");
         if (meta) {
           meta.setAttribute("content", "width=device-width, initial-scale=1, viewport-fit=cover");
         }

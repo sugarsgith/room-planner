@@ -53,23 +53,24 @@ button.danger { color: var(--danger); border-color: #e3b2aa; }
 }
 @media (display-mode: standalone) {
   html { background: var(--panel); }
-  .app {
-    box-sizing: border-box;
-    padding-top: env(safe-area-inset-top);
-    padding-right: env(safe-area-inset-right);
-    padding-bottom: env(safe-area-inset-bottom);
-    padding-left: env(safe-area-inset-left);
-    background: var(--panel);
-  }
+  .app { background: var(--panel); }
 }
 html.standalone { background: var(--panel); }
+html.standalone .app { background: var(--panel); }
+/* Home-screen only. --safe-area-* lets tests fake the iPhone inset; otherwise env(). */
+@media (display-mode: standalone) {
+  .app {
+    padding-top: var(--safe-area-top, env(safe-area-inset-top, 0px));
+    padding-right: var(--safe-area-right, env(safe-area-inset-right, 0px));
+    padding-bottom: var(--safe-area-bottom, env(safe-area-inset-bottom, 0px));
+    padding-left: var(--safe-area-left, env(safe-area-inset-left, 0px));
+  }
+}
 html.standalone .app {
-  box-sizing: border-box;
-  padding-top: env(safe-area-inset-top);
-  padding-right: env(safe-area-inset-right);
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: env(safe-area-inset-left);
-  background: var(--panel);
+  padding-top: var(--safe-area-top, env(safe-area-inset-top, 0px));
+  padding-right: var(--safe-area-right, env(safe-area-inset-right, 0px));
+  padding-bottom: var(--safe-area-bottom, env(safe-area-inset-bottom, 0px));
+  padding-left: var(--safe-area-left, env(safe-area-inset-left, 0px));
 }
 .update-banner {
   display: flex;

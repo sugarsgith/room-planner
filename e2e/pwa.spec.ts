@@ -31,6 +31,15 @@ test("manifest and service worker are available in the production build", async 
   expect(registration.scope).toBe("http://127.0.0.1:4173/");
   expect(registration.script).toContain("sw.js");
   expect(new URL(registration.script).pathname.endsWith("/sw.js")).toBe(true);
+
+  const html = await (await page.request.get("./")).text();
+  expect(html).toContain("viewport-fit=cover");
+  expect(html).toContain('name="apple-mobile-web-app-status-bar-style" content="black-translucent"');
+  const sw = await (await page.request.get("./sw.js")).text();
+  expect(sw).toContain("room-planner-v2");
+  expect(await page.locator('meta[name="viewport"]').getAttribute("content")).toBe(
+    "width=device-width, initial-scale=1",
+  );
 });
 
 test("update banner stays until the user chooses to reload", async ({ page }) => {
