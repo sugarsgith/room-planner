@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createInitialProject } from "./initial";
 import { parseProjectJson, validateProject } from "./schema";
 import { serializeProject } from "./storage";
+import { cmToM } from "./units";
 import type { FurnitureItem, Project } from "./types";
 
 function legacyDocument(version: 1 | 2 | 3) {
@@ -235,5 +236,48 @@ describe("import validation", () => {
     const mismatch = validateProject(project);
     expect(mismatch.ok).toBe(false);
     if (!mismatch.ok) expect(mismatch.error).toContain("outline");
+  });
+
+  it("keeps schema 5 when a stored item has an approximate size, and still reads a file without one", () => {
+    const project = sample();
+    project.furniture[0].spaces = [
+      { id: "under-bed", name: "ベッド下", width: cmToM(90), depth: cmToM(190), height: cmToM(20), note: "" },
+    ];
+    project.storedItems = [
+      {
+        id: "box",
+        name: "衣装ケース",
+        quantity: 2,
+        spaceId: "under-bed",
+        note: "",
+        width: cmToM(40),
+        depth: cmToM(30),
+        height: cmToM(15),
+      },
+    ];
+    const text = serializeProject(project);
+    const saved = JSON.parse(text) as Project;
+    expect(saved.schemaVersion).toBe(5);
+    const loaded = parseProjectJson(text);
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.project.storedItems[0].width).toBe(cmToM(40));
+    expect(loaded.project.room.name).toBe(project.room.name);
+    expect(loaded.project.layouts[0].placements.map((placement) => placement.furnitureId)).toEqual(
+      project.layouts[0].placements.map((placement) => placement.furnitureId),
+    );
+
+    const legacy = structuredClone(saved) as Project;
+    for (const item of legacy.storedItems) {
+      delete item.width;
+      delete item.depth;
+      delete item.height;
+    }
+    const withoutSize = parseProjectJson(JSON.stringify(legacy));
+    expect(withoutSize.ok).toBe(true);
+    if (!withoutSize.ok) return;
+    expect(withoutSize.project.storedItems[0].name).toBe("衣装ケース");
+    expect(withoutSize.project.storedItems[0].width).toBeUndefined();
+    expect(withoutSize.project.schemaVersion).toBe(5);
   });
 });

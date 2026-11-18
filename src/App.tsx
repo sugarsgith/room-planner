@@ -5,7 +5,10 @@ import { FurnitureList } from "./components/FurnitureList";
 import { Inspector } from "./components/Inspector";
 import { PlanView } from "./components/PlanView";
 import { RoomScene } from "./components/RoomScene";
+import { ExportReminder, useExportReminder } from "./components/ExportReminder";
+import { StorageWorkspace } from "./components/StorageView";
 import { Toolbar } from "./components/Toolbar";
+import { serializeProject } from "./domain/storage";
 import { analyzeLayout, issueIsActive } from "./domain/geometry";
 import { activeFurniture } from "./domain/schema";
 import { cmToM, formatCm } from "./domain/units";
@@ -23,7 +26,14 @@ export function App() {
   const selectedId = useEditor((s) => s.selectedId);
   const selectionSeq = useEditor((s) => s.selectionSeq);
   const compareLayoutId = useEditor((s) => s.compareLayoutId);
+  const workMode = useEditor((s) => s.workMode);
+  const reminder = useExportReminder();
+  const [corruptExported, setCorruptExported] = useState(false);
   useHistoryKeys();
+
+  useEffect(() => {
+    setCorruptExported(false);
+  }, [corruptRaw, loadStatus]);
 
   const furniture = activeFurniture(project);
   const issues = useMemo(() => analyzeLayout(project.room, furniture), [project.room, furniture]);
@@ -37,23 +47,40 @@ export function App() {
 
   return (
     <div className="app">
-      <Toolbar />
+      <Toolbar onExported={reminder.markExported} />
+      {loadStatus !== "corrupt" && reminder.visible && (
+        <ExportReminder
+          message={reminder.message}
+          onExport={() => {
+            downloadText("room-planner.json", serializeProject(project), "application/json");
+            reminder.markExported();
+          }}
+          onDismiss={reminder.dismiss}
+        />
+      )}
       <UpdateNotice />
       {loadStatus === "corrupt" && (
         <div className="banner" role="alert" data-testid="corrupt-banner">
-          <p>
-            保存データを読み込めなかったため、初期レイアウトを表示しています。自動保存は停止中で、元のデータは上書きしていません。
-            {loadError ? ` ${loadError}` : ""}
-          </p>
+          <div>
+            <p>
+              保存データを読み込めなかったため、初期レイアウトを表示しています。自動保存は停止中で、元のデータは上書きしていません。
+              {loadError ? ` ${loadError}` : ""}
+            </p>
+            <p className="hint">上書きする前に、生データを書き出してください。</p>
+          </div>
           <div className="banner-actions">
             <button
               type="button"
-              onClick={() => downloadText("room-planner-corrupt-backup.txt", corruptRaw ?? "", "text/plain")}
+              data-testid="corrupt-export"
+              onClick={() => {
+                downloadText("room-planner-corrupt-backup.txt", corruptRaw ?? "", "text/plain");
+                if (corruptRaw) setCorruptExported(true);
+              }}
               disabled={!corruptRaw}
             >
               生データを書き出す
             </button>
-            <button type="button" onClick={resumePersist}>
+            <button type="button" data-testid="corrupt-resume" onClick={resumePersist} disabled={!corruptExported}>
               この内容で保存を再開
             </button>
           </div>
@@ -64,6 +91,9 @@ export function App() {
           <p>{loadError}</p>
         </div>
       )}
+      {workMode === "storage" ? (
+        <StorageWorkspace />
+      ) : (
       <div className="workspace" data-phone-tab={phoneTab} data-compare={compareLayoutId ? "true" : "false"}>
         {compareLayoutId ? <DiffPanel /> : <FurnitureList />}
         <main className={compareLayoutId ? "stage compare" : "stage"} data-testid="stage">
@@ -100,6 +130,7 @@ export function App() {
         </nav>
         <Inspector />
       </div>
+      )}
       <footer className="status" data-testid="status-bar">
         <span>
           部屋 {formatCm(project.room.width)} × {formatCm(project.room.depth)} cm / 天井 {formatCm(project.room.ceilingHeight)} cm

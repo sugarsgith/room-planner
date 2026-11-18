@@ -243,4 +243,55 @@ describe("editor store", () => {
     expect(useEditor.getState().project.furniture.some((item) => item.id === "bed")).toBe(false);
     expect(useEditor.getState().project.storedItems).toHaveLength(0);
   });
+
+  it("stores an optional item size on schema 5 and can clear it without dropping unknown fields", () => {
+    const { storage, map } = memory();
+    initEditor(storage);
+    useEditor.getState().addStorageSpace("bed", {
+      id: "under-bed",
+      name: "ベッド下",
+      width: cmToM(90),
+      depth: cmToM(190),
+      height: cmToM(20),
+      note: "",
+    });
+    useEditor.getState().addStoredItem({ id: "box", name: "衣装ケース", quantity: 1, spaceId: "under-bed", note: "冬" });
+    const withExtra = structuredClone(useEditor.getState().project);
+    const extra = withExtra.storedItems[0] as typeof withExtra.storedItems[0] & { boxCode?: string };
+    extra.boxCode = "A-1";
+    useEditor.setState({ project: withExtra });
+    useEditor.getState().updateStoredItem({
+      ...useEditor.getState().project.storedItems[0],
+      name: "冬服",
+      quantity: 2,
+      width: cmToM(40),
+      depth: cmToM(30),
+      height: cmToM(15),
+    });
+    const saved = JSON.parse(map.get(STORAGE_KEY) ?? "{}") as {
+      schemaVersion: number;
+      storedItems: ({ name: string; quantity: number; width?: number; boxCode?: string })[];
+    };
+    expect(saved.schemaVersion).toBe(5);
+    expect(saved.storedItems[0]).toMatchObject({ name: "冬服", quantity: 2, width: cmToM(40), boxCode: "A-1" });
+    useEditor.getState().undo();
+    expect(useEditor.getState().project.storedItems[0].name).toBe("衣装ケース");
+    expect(useEditor.getState().project.storedItems[0].width).toBeUndefined();
+
+    useEditor.getState().updateStoredItem({
+      ...useEditor.getState().project.storedItems[0],
+      width: cmToM(40),
+      depth: cmToM(30),
+      height: cmToM(15),
+    });
+    const cleared = { ...useEditor.getState().project.storedItems[0] };
+    delete cleared.width;
+    delete cleared.depth;
+    delete cleared.height;
+    useEditor.getState().updateStoredItem(cleared);
+    const after = JSON.parse(map.get(STORAGE_KEY) ?? "{}") as { storedItems: { width?: number; boxCode?: string }[] };
+    expect(after.storedItems[0].width).toBeUndefined();
+    expect(after.storedItems[0].boxCode).toBe("A-1");
+    expect(useEditor.getState().project.schemaVersion).toBe(5);
+  });
 });

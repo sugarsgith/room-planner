@@ -160,13 +160,21 @@ export interface StorageSpace {
   note: string;
 }
 
-/** Something kept in one storage space. */
+/**
+ * Something kept in one storage space.
+ * Width, depth, and height are an optional approximate size in meters.
+ * Leave all three off when the size is unknown. They are not required,
+ * so a file written with them still opens in the published schema 5 app.
+ */
 export interface StoredItem {
   id: string;
   name: string;
   quantity: number;
   spaceId: string;
   note: string;
+  width?: number;
+  depth?: number;
+  height?: number;
 }
 
 /** Shared across every layout. Position is not stored here. */

@@ -51,7 +51,7 @@ export function StorageSection({ furnitureId }: { furnitureId: string }) {
       <div className="panel-head">
         <h2>収納</h2>
       </div>
-      <p className="hint">内寸は cm です。移動しても、この案から外しても残ります。備え付け収納の台帳はまだありません。</p>
+      <p className="hint">内寸は cm です。移動しても、この案から外しても残ります。入ったものの修正は上の「収納」です。備え付け収納の中はまだ記録できません。</p>
       {spaces.map((space) => (
         <div key={space.id} className="fixture-row" data-testid={`storage-space-${space.id}`}>
           <span>

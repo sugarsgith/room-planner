@@ -1,11 +1,14 @@
 import { useRef, useState } from "react";
+import { parseProjectJson } from "../domain/schema";
 import { serializeProject } from "../domain/storage";
 import { downloadText } from "../lib/download";
 import { saveStatusLabel, useEditor } from "../state/store";
 
-export function Toolbar() {
+export function Toolbar({ onExported }: { onExported: () => void }) {
   const viewMode = useEditor((s) => s.viewMode);
   const setViewMode = useEditor((s) => s.setViewMode);
+  const workMode = useEditor((s) => s.workMode);
+  const setWorkMode = useEditor((s) => s.setWorkMode);
   const undo = useEditor((s) => s.undo);
   const redo = useEditor((s) => s.redo);
   const past = useEditor((s) => s.past.length);
@@ -20,6 +23,7 @@ export function Toolbar() {
   const savedAt = useEditor((s) => s.savedAt);
   const fileRef = useRef<HTMLInputElement>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [pendingImport, setPendingImport] = useState<string | null>(null);
   const statusText = saveStatusLabel(saveStatus, savedAt);
 
   function openImport() {
@@ -30,6 +34,14 @@ export function Toolbar() {
   function exportProject() {
     setMoreOpen(false);
     downloadText("room-planner.json", serializeProject(project), "application/json");
+    onExported();
+  }
+
+  function acceptImport() {
+    if (!pendingImport) return;
+    const text = pendingImport;
+    setPendingImport(null);
+    importJson(text);
   }
 
   return (
@@ -38,6 +50,27 @@ export function Toolbar() {
         <strong>部屋プランナー</strong>
         <span>実寸で家具を置く</span>
       </div>
+      <div className="toolbar-group" role="group" aria-label="画面">
+        <button
+          type="button"
+          className={workMode === "layout" ? "active" : ""}
+          aria-pressed={workMode === "layout"}
+          data-testid="work-mode-layout"
+          onClick={() => setWorkMode("layout")}
+        >
+          配置
+        </button>
+        <button
+          type="button"
+          className={workMode === "storage" ? "active" : ""}
+          aria-pressed={workMode === "storage"}
+          data-testid="work-mode-storage"
+          onClick={() => setWorkMode("storage")}
+        >
+          収納
+        </button>
+      </div>
+      {workMode === "layout" && (
       <div className="toolbar-group" role="group" aria-label="表示切替">
         <button
           type="button"
@@ -58,6 +91,7 @@ export function Toolbar() {
           3D
         </button>
       </div>
+      )}
       <div className="toolbar-group">
         <button type="button" onClick={undo} disabled={past === 0} title="元に戻す (Ctrl/⌘+Z)">
           元に戻す
@@ -71,6 +105,7 @@ export function Toolbar() {
           やり直す
         </button>
       </div>
+      {workMode === "layout" && (
       <div className="toolbar-group">
         <button type="button" onClick={() => requestViewCommand("zoom-in")}>
           拡大
@@ -82,6 +117,7 @@ export function Toolbar() {
           全体
         </button>
       </div>
+      )}
       <div className="toolbar-group">
         <button type="button" data-testid="save-button" onClick={() => saveNow()}>
           保存
@@ -126,13 +162,36 @@ export function Toolbar() {
         type="file"
         accept="application/json,.json"
         hidden
+        data-testid="import-file"
         onChange={async (event) => {
           const file = event.target.files?.[0];
           event.target.value = "";
           if (!file) return;
-          importJson(await file.text());
+          const text = await file.text();
+          const parsed = parseProjectJson(text);
+          if (!parsed.ok) {
+            importJson(text);
+            return;
+          }
+          setPendingImport(text);
         }}
       />
+      {pendingImport && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="import-confirm-title" data-testid="import-confirm">
+            <h2 id="import-confirm-title">読み込み</h2>
+            <p data-testid="import-confirm-message">この端末の記録を、ファイルの内容に置き換えます。</p>
+            <div className="list-actions">
+              <button type="button" data-testid="import-confirm-accept" onClick={acceptImport}>
+                置き換える
+              </button>
+              <button type="button" data-testid="import-confirm-cancel" onClick={() => setPendingImport(null)}>
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {importError && (
         <p className="import-error" data-testid="import-error" role="alert">
           読み込めませんでした。{importError}
