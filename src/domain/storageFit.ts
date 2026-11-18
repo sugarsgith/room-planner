@@ -38,7 +38,7 @@ export function itemSize(item: Pick<StoredItem, "width" | "depth" | "height">): 
   return { width, depth, height };
 }
 
-export function fitStoredItem(item: StoredItem, space: StorageSpace): ItemFit {
+export function fitStoredItem(item: StoredItem, space: StorageSpace, placeWord = "スペース"): ItemFit {
   const size = itemSize(item);
   if (!size) return { kind: "unset", label: "サイズ未入力", countNote: null };
   if (!cmFits(size.height, space.height)) return { kind: "too-tall", label: "高さが足りない", countNote: null };
@@ -48,7 +48,7 @@ export function fitStoredItem(item: StoredItem, space: StorageSpace): ItemFit {
   const kind: FitKind = asStored ? "fits" : "fits-rotated";
   const label = asStored ? "入る" : "向きを変えると入る";
   const countNote = countExceeds(size, item.quantity, space)
-    ? `${item.quantity}個分の容積は、このスペースの目安を超えます`
+    ? `${item.quantity}個分の容積は、この${placeWord}の目安を超えます`
     : null;
   return { kind, label, countNote };
 }

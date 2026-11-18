@@ -280,4 +280,48 @@ describe("import validation", () => {
     expect(withoutSize.project.storedItems[0].width).toBeUndefined();
     expect(withoutSize.project.schemaVersion).toBe(5);
   });
+
+  it("accepts a container nested by optional fields and still requires a real space id", () => {
+    const project = sample();
+    project.furniture[0].spaces = [
+      { id: "under-bed", name: "ベッド下", width: cmToM(90), depth: cmToM(190), height: cmToM(20), note: "" },
+    ];
+    project.storedItems = [
+      {
+        id: "fits",
+        name: "FITS",
+        quantity: 1,
+        spaceId: "under-bed",
+        note: "",
+        width: cmToM(40),
+        depth: cmToM(30),
+        height: cmToM(15),
+        innerWidth: cmToM(35),
+        innerDepth: cmToM(25),
+        innerHeight: cmToM(12),
+      },
+      {
+        id: "clothes",
+        name: "冬服",
+        quantity: 1,
+        spaceId: "under-bed",
+        note: "",
+        width: cmToM(30),
+        depth: cmToM(20),
+        height: cmToM(5),
+        containerId: "fits",
+      },
+    ];
+    const loaded = parseProjectJson(serializeProject(project));
+    expect(loaded.ok).toBe(true);
+    if (!loaded.ok) return;
+    expect(loaded.project.schemaVersion).toBe(5);
+    expect(loaded.project.storedItems[0].innerWidth).toBe(cmToM(35));
+    expect(loaded.project.storedItems[1].containerId).toBe("fits");
+    expect(loaded.project.storedItems[1].spaceId).toBe("under-bed");
+
+    const broken = structuredClone(project);
+    broken.storedItems[1].spaceId = "fits";
+    expect(parseProjectJson(JSON.stringify(broken)).ok).toBe(false);
+  });
 });

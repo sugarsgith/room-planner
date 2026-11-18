@@ -1,13 +1,14 @@
 import { useMemo, useState } from "react";
+import { itemPath, parentContainer } from "../domain/containers";
 import { cmToM, formatCm } from "../domain/units";
 import { useEditor } from "../state/store";
+import { RemoveStoredItemButton } from "./StorageView";
 
 export function StorageSection({ furnitureId }: { furnitureId: string }) {
   const project = useEditor((s) => s.project);
   const addSpace = useEditor((s) => s.addStorageSpace);
   const removeSpace = useEditor((s) => s.removeStorageSpace);
   const addItem = useEditor((s) => s.addStoredItem);
-  const removeItem = useEditor((s) => s.removeStoredItem);
   const item = project.furniture.find((entry) => entry.id === furnitureId);
   const spaces = item?.spaces ?? [];
   const [name, setName] = useState("");
@@ -92,16 +93,18 @@ export function StorageSection({ furnitureId }: { furnitureId: string }) {
       {spaces.length > 0 && (
         <>
           <ul className="furniture-list">
-            {held.map((entry) => (
-              <li key={entry.id} className="fixture-row">
-                <span>
-                  {entry.name} × {entry.quantity}
-                </span>
-                <button type="button" onClick={() => removeItem(entry.id)}>
-                  外す
-                </button>
-              </li>
-            ))}
+            {held.map((entry) => {
+              const parent = parentContainer(entry, project.storedItems);
+              return (
+                <li key={entry.id} className="fixture-row">
+                  <span>
+                    {entry.name} × {entry.quantity}
+                    {parent ? ` / ${parent.name}` : ""}
+                  </span>
+                  <RemoveStoredItemButton itemId={entry.id} />
+                </li>
+              );
+            })}
           </ul>
           <label className="field field-wide">
             <span>収納物</span>
@@ -160,7 +163,7 @@ export function StorageIndex() {
       <ul className="furniture-list">
         {rows.map((row) => (
           <li key={row.item.id} className="row-size">
-            {row.item.name} × {row.item.quantity} / {row.where?.owner} · {row.where?.space.name}
+            {itemPath(row.item, project.storedItems, row.where?.space.name ?? "")} × {row.item.quantity}
           </li>
         ))}
       </ul>

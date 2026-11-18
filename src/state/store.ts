@@ -3,6 +3,7 @@ import { rectangleOutline } from "../domain/geometry";
 import { createInitialProject } from "../domain/initial";
 import { activeFurniture, activeLayout, LIMITS, parseProjectJson } from "../domain/schema";
 import { loadProject, saveProject, type KeyValueStorage, type LoadStatus } from "../domain/storage";
+import { isContainer, sanitizeStoredItem } from "../domain/containers";
 import { fixtureError } from "../domain/fixtures";
 import type { Furniture, FurnitureItem, FurnitureShape, Placement, Project, Room, RoomFixture, StorageSpace, StoredItem } from "../domain/types";
 import { normalizeDegrees, roundM } from "../domain/units";
@@ -59,7 +60,7 @@ export interface EditorState {
   removeStorageSpace: (furnitureId: string, spaceId: string) => void;
   addStoredItem: (item: StoredItem) => void;
   updateStoredItem: (item: StoredItem, mode?: UpdateMode) => void;
-  removeStoredItem: (id: string) => void;
+  removeStoredItem: (id: string, contents?: "release" | "discard") => void;
   setWallsVisible: (value: boolean) => void;
   setWallsTransparent: (value: boolean) => void;
   requestViewCommand: (type: ViewCommand["type"]) => void;
@@ -316,10 +317,16 @@ export const useEditor = create<EditorState>((set, get) => {
       const previous = project.storedItems.find((entry) => entry.id === item.id);
       if (!previous) return;
       if (!project.furniture.some((entry) => (entry.spaces ?? []).some((space) => space.id === item.spaceId))) return;
-      const next: Project = {
-        ...project,
-        storedItems: project.storedItems.map((entry) => (entry.id === item.id ? mergeStoredItem(entry, item) : entry)),
-      };
+      const merged = sanitizeStoredItem(mergeStoredItem(previous, item), project.storedItems);
+      let storedItems = project.storedItems.map((entry) => (entry.id === item.id ? merged : entry));
+      if (isContainer(previous) && !isContainer(merged)) {
+        storedItems = storedItems.map((entry) => clearContainerLink(entry, merged.id));
+      } else if (isContainer(merged) && previous.spaceId !== merged.spaceId) {
+        storedItems = storedItems.map((entry) =>
+          entry.containerId === merged.id ? { ...entry, spaceId: merged.spaceId } : entry,
+        );
+      }
+      const next: Project = { ...project, storedItems };
       if (sameDocument(project, next)) return;
       if (resolved === "preview") {
         set({ project: next });
@@ -327,13 +334,18 @@ export const useEditor = create<EditorState>((set, get) => {
       }
       commitProject(next, get().selectedId);
     },
-    removeStoredItem: (id) => {
+    removeStoredItem: (id, contents) => {
       if (get().gestureBefore) get().endGesture();
       const project = get().project;
-      commitProject(
-        { ...project, storedItems: project.storedItems.filter((item) => item.id !== id) },
-        get().selectedId,
-      );
+      const kids = project.storedItems.filter((item) => item.containerId === id);
+      if (kids.length > 0 && contents !== "release" && contents !== "discard") return;
+      let storedItems = project.storedItems.filter((item) => item.id !== id);
+      if (contents === "discard") {
+        storedItems = storedItems.filter((item) => item.containerId !== id);
+      } else {
+        storedItems = storedItems.map((entry) => clearContainerLink(entry, id));
+      }
+      commitProject({ ...project, storedItems }, get().selectedId);
     },
     setWallsVisible: (wallsVisible) => set({ wallsVisible }),
     setWallsTransparent: (wallsTransparent) => set({ wallsTransparent }),
@@ -591,7 +603,18 @@ function mergeStoredItem(previous: StoredItem, next: StoredItem): StoredItem {
   if (next.width === undefined) delete merged.width;
   if (next.depth === undefined) delete merged.depth;
   if (next.height === undefined) delete merged.height;
+  if (next.innerWidth === undefined) delete merged.innerWidth;
+  if (next.innerDepth === undefined) delete merged.innerDepth;
+  if (next.innerHeight === undefined) delete merged.innerHeight;
+  if (next.containerId === undefined) delete merged.containerId;
   return merged;
+}
+
+function clearContainerLink(item: StoredItem, containerId: string): StoredItem {
+  if (item.containerId !== containerId) return item;
+  const next: StoredItem = { ...item };
+  delete next.containerId;
+  return next;
 }
 
 function mapSpaces(project: Project, furnitureId: string, fn: (spaces: StorageSpace[]) => StorageSpace[]): Project {

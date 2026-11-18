@@ -1,4 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  childItems,
+  directItems,
+  innerSpace,
+  isContainer,
+  itemPath,
+  parentContainer,
+} from "../domain/containers";
 import { fixtureLabel } from "../domain/fixtures";
 import { fitStoredItem, spaceFill, type FitKind } from "../domain/storageFit";
 import { LIMITS } from "../domain/schema";
@@ -90,10 +98,8 @@ export function StorageWorkspace() {
                   }}
                 >
                   <span className="row-text">
-                    <span className="row-name">{hit.item.name}</span>
-                    <span className="row-size">
-                      {hit.owner.name} · {hit.space.name}
-                    </span>
+                    <span className="row-name">{itemPath(hit.item, project.storedItems, hit.space.name)}</span>
+                    <span className="row-size">{hit.owner.name}</span>
                   </span>
                 </button>
               </li>
@@ -177,7 +183,7 @@ export function StorageWorkspace() {
               内寸と収納物は、どの配置案でも共通です。
             </p>
             {(selectedFurniture.spaces ?? []).map((space) => {
-              const held = project.storedItems.filter((item) => item.spaceId === space.id);
+              const held = directItems(space.id, project.storedItems);
               const selected = focus?.kind === "space" && focus.id === space.id;
               return (
                 <article
@@ -194,37 +200,11 @@ export function StorageWorkspace() {
                     </span>
                   </button>
                   {space.note ? <p className="hint">{space.note}</p> : null}
-                  <FillMeter space={space} items={held} />
+                  <FillMeter space={space} items={held} testId={`space-fill-${space.id}`} />
                   <ul className="furniture-list">
-                    {held.map((item) => {
-                      const fit = fitStoredItem(item, space);
-                      const itemSelected = focus?.kind === "item" && focus.id === item.id;
-                      return (
-                        <li key={item.id}>
-                          <button
-                            type="button"
-                            className={itemSelected ? "row selected" : "row"}
-                            data-testid={`storage-view-item-${item.id}`}
-                            onClick={() => setFocus({ kind: "item", id: item.id })}
-                          >
-                            <span className="row-text">
-                              <span className="row-name">
-                                {item.name} × {item.quantity}
-                              </span>
-                              <span className="row-size">{sizeText(item)}</span>
-                            </span>
-                            <span data-testid={`item-fit-${item.id}`} className={fitClass(fit.kind)}>
-                              {fit.label}
-                            </span>
-                          </button>
-                          {fit.countNote ? (
-                            <p className="hint" data-testid={`item-count-${item.id}`}>
-                              {fit.countNote}
-                            </p>
-                          ) : null}
-                        </li>
-                      );
-                    })}
+                    {held.map((item) => (
+                      <StoredItemRow key={item.id} item={item} items={project.storedItems} parentSpace={space} focus={focus} onFocus={setFocus} />
+                    ))}
                   </ul>
                 </article>
               );
@@ -262,14 +242,75 @@ export function StorageWorkspace() {
   );
 }
 
-function FillMeter({ space, items }: { space: StorageSpace; items: StoredItem[] }) {
+function StoredItemRow({
+  item,
+  items,
+  parentSpace,
+  focus,
+  onFocus,
+  nested = false,
+}: {
+  item: StoredItem;
+  items: StoredItem[];
+  parentSpace: StorageSpace;
+  focus: FocusRef | null;
+  onFocus: (focus: FocusRef) => void;
+  nested?: boolean;
+}) {
+  const container = isContainer(item);
+  const cavity = container ? innerSpace(item) : null;
+  const fit = fitStoredItem(item, parentSpace, nested ? "入れ物" : "スペース");
+  const kids = container ? childItems(item, items) : [];
+  const itemSelected = focus?.kind === "item" && focus.id === item.id;
+  return (
+    <li>
+      <button
+        type="button"
+        className={itemSelected ? "row selected" : "row"}
+        data-testid={`storage-view-item-${item.id}`}
+        onClick={() => onFocus({ kind: "item", id: item.id })}
+      >
+        <span className="row-text">
+          <span className="row-name">
+            {item.name} × {item.quantity}
+            {container ? " 入れ物" : ""}
+          </span>
+          <span className="row-size">{sizeText(item)}</span>
+        </span>
+        <span data-testid={`item-fit-${item.id}`} className={fitClass(fit.kind)}>
+          {fit.label}
+        </span>
+      </button>
+      {fit.countNote ? (
+        <p className="hint" data-testid={`item-count-${item.id}`}>
+          {fit.countNote}
+        </p>
+      ) : null}
+      {cavity && (
+        <div className="nested-items" data-testid={`container-block-${item.id}`}>
+          <p className="hint">
+            内寸 {formatCm(cavity.width)} × {formatCm(cavity.depth)} × {formatCm(cavity.height)} cm
+          </p>
+          <FillMeter space={cavity} items={kids} testId={`container-fill-${item.id}`} />
+          <ul className="furniture-list">
+            {kids.map((child) => (
+              <StoredItemRow key={child.id} item={child} items={items} parentSpace={cavity} focus={focus} onFocus={onFocus} nested />
+            ))}
+          </ul>
+        </div>
+      )}
+    </li>
+  );
+}
+
+function FillMeter({ space, items, testId }: { space: StorageSpace; items: StoredItem[]; testId: string }) {
   const fill = spaceFill(items, space);
   const width = fill.ratio == null ? 0 : Math.max(0, Math.min(100, fill.ratio * 100));
   return (
     <div className="fill-block">
       <div className="fill-head">
         <span>埋まり具合</span>
-        <span data-testid={`space-fill-${space.id}`}>{fill.label}</span>
+        <span data-testid={testId}>{fill.label}</span>
       </div>
       <div className={fill.ratio != null && fill.ratio > 1 ? "fill-meter over" : "fill-meter"}>
         <span style={{ width: `${width}%` }} />
@@ -332,7 +373,9 @@ function ItemEditor({ itemId }: { itemId: string }) {
   const item = project.storedItems.find((entry) => entry.id === itemId);
   const space = project.furniture.flatMap((entry) => entry.spaces ?? []).find((entry) => entry.id === item?.spaceId);
   if (!item || !space) return <p className="hint">この収納物はもうありません。</p>;
-  const fit = fitStoredItem(item, space);
+  const parent = parentContainer(item, project.storedItems);
+  const cavity = parent ? innerSpace(parent) : null;
+  const fit = fitStoredItem(item, cavity ?? space, parent ? "入れ物" : "スペース");
   return (
     <>
       <p className={fitClass(fit.kind)} data-testid="item-edit-fit">
@@ -345,9 +388,113 @@ function ItemEditor({ itemId }: { itemId: string }) {
         testId="item-edit-name"
         onPreview={(name) => updateStoredItem({ ...item, name }, "preview")}
       />
+      <PlaceField item={item} />
       <QuantityField item={item} />
       <ItemSizeFields item={item} />
+      <ItemInnerFields item={item} />
       <NoteField value={item.note} testId="item-edit-note" onCommit={(note) => updateStoredItem({ ...item, note })} />
+      <RemoveStoredItemButton itemId={item.id} />
+    </>
+  );
+}
+
+function PlaceField({ item }: { item: StoredItem }) {
+  const project = useEditor((s) => s.project);
+  const updateStoredItem = useEditor((s) => s.updateStoredItem);
+  const parent = parentContainer(item, project.storedItems);
+  const container = isContainer(item);
+  const value = parent ? `box:${parent.id}` : `space:${item.spaceId}`;
+  const spaces = project.furniture.flatMap((furniture) =>
+    (furniture.spaces ?? []).map((space) => ({ furniture, space })),
+  );
+  const boxes = project.storedItems.filter((entry) => isContainer(entry) && entry.id !== item.id);
+  return (
+    <label className="field field-wide">
+      <span>場所</span>
+      <select
+        data-testid="item-edit-place"
+        value={value}
+        onChange={(event) => {
+          const next = event.target.value;
+          if (next.startsWith("space:")) {
+            const moved: StoredItem = { ...item, spaceId: next.slice("space:".length) };
+            delete moved.containerId;
+            updateStoredItem(moved);
+            return;
+          }
+          const box = project.storedItems.find((entry) => entry.id === next.slice("box:".length));
+          if (!box) return;
+          updateStoredItem({ ...item, spaceId: box.spaceId, containerId: box.id });
+        }}
+      >
+        {spaces.map(({ furniture, space }) => (
+          <option key={space.id} value={`space:${space.id}`}>
+            {furniture.name} · {space.name}
+          </option>
+        ))}
+        {!container &&
+          boxes.map((box) => (
+            <option key={box.id} value={`box:${box.id}`}>
+              {box.name} の中
+            </option>
+          ))}
+      </select>
+    </label>
+  );
+}
+
+export function RemoveStoredItemButton({ itemId }: { itemId: string }) {
+  const project = useEditor((s) => s.project);
+  const removeStoredItem = useEditor((s) => s.removeStoredItem);
+  const [open, setOpen] = useState(false);
+  const item = project.storedItems.find((entry) => entry.id === itemId);
+  const kids = project.storedItems.filter((entry) => entry.containerId === itemId);
+  if (!item) return null;
+  if (kids.length === 0) {
+    return (
+      <button type="button" data-testid="remove-stored-item" onClick={() => removeStoredItem(itemId)}>
+        外す
+      </button>
+    );
+  }
+  const names = kids.map((entry) => entry.name).join("、");
+  return (
+    <>
+      <button type="button" data-testid="remove-stored-item" onClick={() => setOpen(true)}>
+        外す
+      </button>
+      {open && (
+        <div className="warn" role="dialog" data-testid="remove-stored-dialog">
+          <p>
+            「{item.name}」を外します。中の「{names}」は消さず、このスペースに出せます。中まで消すこともできます。
+          </p>
+          <div className="list-actions">
+            <button
+              type="button"
+              data-testid="remove-item-release"
+              onClick={() => {
+                removeStoredItem(itemId, "release");
+                setOpen(false);
+              }}
+            >
+              スペースに出す
+            </button>
+            <button
+              type="button"
+              data-testid="remove-item-discard"
+              onClick={() => {
+                removeStoredItem(itemId, "discard");
+                setOpen(false);
+              }}
+            >
+              中の物も消す
+            </button>
+            <button type="button" data-testid="remove-item-cancel" onClick={() => setOpen(false)}>
+              キャンセル
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
@@ -356,34 +503,104 @@ function QuantityField({ item }: { item: StoredItem }) {
   const updateStoredItem = useEditor((s) => s.updateStoredItem);
   const [text, setText] = useState(String(item.quantity));
   const focused = useRef(false);
+  const container = isContainer(item);
   useEffect(() => {
     if (!focused.current) setText(String(item.quantity));
   }, [item.id, item.quantity]);
   return (
-    <label className="field">
-      <span>数量</span>
-      <input
-        data-testid="item-edit-qty"
-        inputMode="numeric"
-        value={text}
-        onFocus={() => {
-          focused.current = true;
-        }}
-        onChange={(event) => setText(event.target.value)}
-        onBlur={(event) => {
-          focused.current = false;
-          const qty = Number(event.currentTarget.value);
-          if (!Number.isInteger(qty) || qty < 1 || qty > 9999) {
-            setText(String(item.quantity));
-            return;
-          }
-          if (qty !== item.quantity) updateStoredItem({ ...item, quantity: qty });
-        }}
-        onKeyDown={(event) => {
-          if (event.key === "Enter") event.currentTarget.blur();
-        }}
-      />
-    </label>
+    <>
+      <label className="field">
+        <span>数量</span>
+        <input
+          data-testid="item-edit-qty"
+          inputMode="numeric"
+          value={container ? "1" : text}
+          disabled={container}
+          onFocus={() => {
+            focused.current = true;
+          }}
+          onChange={(event) => setText(event.target.value)}
+          onBlur={(event) => {
+            focused.current = false;
+            const qty = Number(event.currentTarget.value);
+            if (!Number.isInteger(qty) || qty < 1 || qty > 9999) {
+              setText(String(item.quantity));
+              return;
+            }
+            if (qty !== item.quantity) updateStoredItem({ ...item, quantity: qty });
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter") event.currentTarget.blur();
+          }}
+        />
+      </label>
+      {container && <p className="hint">入れ物は1個だけです。同じものが複数あるときは、1つずつ登録してください。</p>}
+    </>
+  );
+}
+
+function ItemInnerFields({ item }: { item: StoredItem }) {
+  const updateStoredItem = useEditor((s) => s.updateStoredItem);
+  const project = useEditor((s) => s.project);
+  const [width, setWidth] = useState("");
+  const [depth, setDepth] = useState("");
+  const [height, setHeight] = useState("");
+  const [hint, setHint] = useState("");
+  const focused = useRef(false);
+  const nested = parentContainer(item, project.storedItems) !== null;
+
+  useEffect(() => {
+    if (focused.current) return;
+    setWidth(shownCm(item.innerWidth));
+    setDepth(shownCm(item.innerDepth));
+    setHeight(shownCm(item.innerHeight));
+    setHint("");
+  }, [item.id, item.innerWidth, item.innerDepth, item.innerHeight]);
+
+  if (item.quantity !== 1) {
+    return <p className="hint">数量が1のときだけ、入れ物にできます。同じものが複数あるときは、1つずつ登録してください。</p>;
+  }
+  if (nested) {
+    return <p className="hint">入れ物の中に、さらに入れ物は置けません。</p>;
+  }
+
+  function commit(nextWidth: string, nextDepth: string, nextHeight: string) {
+    const parsed = [nextWidth, nextDepth, nextHeight].map(parseCm);
+    if (parsed.every((value) => value === "empty")) {
+      const cleared: StoredItem = { ...item };
+      delete cleared.innerWidth;
+      delete cleared.innerDepth;
+      delete cleared.innerHeight;
+      updateStoredItem(cleared);
+      setHint(childItems(item, project.storedItems).length > 0 ? "中の物は、このスペースに出します。" : "");
+      return;
+    }
+    if (parsed.every((value) => typeof value === "number")) {
+      updateStoredItem({
+        ...item,
+        quantity: 1,
+        innerWidth: parsed[0] as number,
+        innerDepth: parsed[1] as number,
+        innerHeight: parsed[2] as number,
+      });
+      setHint("");
+      return;
+    }
+    if (parsed.some((value) => value === "invalid")) {
+      setHint("1〜1000cm の数値にしてください。空欄なら入れ物ではありません。");
+      return;
+    }
+    setHint("内寸は、幅・奥行き・高さをそろえて入れます。");
+  }
+
+  return (
+    <>
+      <p className="hint">入れ物の内寸（cm）。中の物はこの内寸で判定します。空欄にすると、中の物はこのスペースに出ます。</p>
+      <OptionalCm label="内幅" value={width} testId="item-edit-inner-width" onFocus={() => (focused.current = true)} onChange={setWidth} onBlur={(value) => { focused.current = false; commit(value, depth, height); }} />
+      <OptionalCm label="内奥行" value={depth} testId="item-edit-inner-depth" onFocus={() => (focused.current = true)} onChange={setDepth} onBlur={(value) => { focused.current = false; commit(width, value, height); }} />
+      <OptionalCm label="内高さ" value={height} testId="item-edit-inner-height" onFocus={() => (focused.current = true)} onChange={setHeight} onBlur={(value) => { focused.current = false; commit(width, depth, value); }} />
+      {hint ? <p className="hint">{hint}</p> : null}
+    </>
   );
 }
 

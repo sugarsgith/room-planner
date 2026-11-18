@@ -55,7 +55,7 @@ test("storage view edits sizes, checks fit, and keeps the phone tabs for the pla
   await expect(page.locator("[data-testid^='storage-view-item-']")).toContainText("冬服 × 2");
 
   await page.getByTestId("storage-view-search").fill("冬服");
-  await expect(page.getByTestId("storage-search-hits")).toContainText("ベッド · ベッド下");
+  await expect(page.getByTestId("storage-search-hits")).toContainText("冬服（ベッド下）");
   await page.getByTestId("storage-view-search").fill("");
 
   await fillSize(page, "40", "30", "10");
@@ -93,13 +93,13 @@ test("storage view edits sizes, checks fit, and keeps the phone tabs for the pla
   expect(list!.x).toBeLessThan(detail!.x);
   expect(detail!.x + detail!.width).toBeLessThanOrEqual(editor!.x + 2);
   await expect(page.getByTestId("phone-tabs")).toHaveCount(0);
-  await page.screenshot({ path: `${outDir}/storage-view-ipad-1024.png` });
+  await page.screenshot({ path: `${outDir}/storage-edit-ipad-1024.png` });
 
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId("phone-tabs")).toHaveCount(0);
   await expect(page.getByTestId("storage-back")).toBeVisible();
   await expect(page.locator("[data-testid^='item-fit-']")).toHaveText("入る");
-  await page.screenshot({ path: `${outDir}/storage-view-iphone-390.png` });
+  await page.screenshot({ path: `${outDir}/storage-edit-iphone-390.png` });
 
   await page.getByTestId("storage-back").click();
   await expect(page.getByTestId("storage-unit-bed")).toBeVisible();

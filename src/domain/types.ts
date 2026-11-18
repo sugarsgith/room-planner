@@ -162,19 +162,30 @@ export interface StorageSpace {
 
 /**
  * Something kept in one storage space.
- * Width, depth, and height are an optional approximate size in meters.
- * Leave all three off when the size is unknown. They are not required,
- * so a file written with them still opens in the published schema 5 app.
+ * Width, depth, and height are an optional outer size in meters.
+ * Inner width, depth, and height make this item a container (入れ物).
+ * `containerId` points at another stored item in the same space. One level only.
+ * `spaceId` always stays a furniture space id, so the published schema 5 app
+ * still lists the item there and keeps these extra fields when it saves.
+ * Leave a size group off when it is unknown. None of these fields are required.
  */
 export interface StoredItem {
   id: string;
   name: string;
   quantity: number;
+  /** Furniture space. Not another stored item. */
   spaceId: string;
   note: string;
+  /** Outer size. Used to see if this item fits in its parent. */
   width?: number;
   depth?: number;
   height?: number;
+  /** Set only when this item sits inside a container. */
+  containerId?: string;
+  /** Interior of a container. All three, or none. */
+  innerWidth?: number;
+  innerDepth?: number;
+  innerHeight?: number;
 }
 
 /** Shared across every layout. Position is not stored here. */
