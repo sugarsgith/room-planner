@@ -3,6 +3,7 @@ import { rectangleOutline } from "../domain/geometry";
 import { createInitialProject } from "../domain/initial";
 import { activeFurniture, activeLayout, LIMITS, parseProjectJson } from "../domain/schema";
 import { loadProject, saveProject, type KeyValueStorage, type LoadStatus } from "../domain/storage";
+import { isContainer, sanitizeStoredItem } from "../domain/containers";
 import { fixtureError } from "../domain/fixtures";
 import type { Furniture, FurnitureItem, FurnitureShape, Placement, Project, Room, RoomFixture, StorageSpace, StoredItem } from "../domain/types";
 import { normalizeDegrees, roundM } from "../domain/units";
@@ -44,19 +45,22 @@ export interface EditorState {
   legacyV4Raw: string | null;
   /** Read-only comparison against the baseline. Not part of the document. */
   compareLayoutId: string | null;
+  /** Layout plan, or the storage ledger. Not part of the saved document. */
+  workMode: "layout" | "storage";
   importError: string | null;
   select: (id: string | null) => void;
   setViewMode: (mode: ViewMode) => void;
+  setWorkMode: (mode: "layout" | "storage") => void;
   setActiveLayout: (id: string) => void;
   duplicateLayout: () => void;
   setCompareLayout: (id: string | null) => void;
   deleteFurniture: (id: string) => void;
   addStorageSpace: (furnitureId: string, space: StorageSpace) => void;
-  updateStorageSpace: (furnitureId: string, space: StorageSpace) => void;
+  updateStorageSpace: (furnitureId: string, space: StorageSpace, mode?: UpdateMode) => void;
   removeStorageSpace: (furnitureId: string, spaceId: string) => void;
   addStoredItem: (item: StoredItem) => void;
-  updateStoredItem: (item: StoredItem) => void;
-  removeStoredItem: (id: string) => void;
+  updateStoredItem: (item: StoredItem, mode?: UpdateMode) => void;
+  removeStoredItem: (id: string, contents?: "release" | "discard") => void;
   setWallsVisible: (value: boolean) => void;
   setWallsTransparent: (value: boolean) => void;
   requestViewCommand: (type: ViewCommand["type"]) => void;
@@ -207,6 +211,7 @@ export const useEditor = create<EditorState>((set, get) => {
     legacyRaw: null,
     legacyV4Raw: null,
     compareLayoutId: null,
+    workMode: "layout",
     importError: null,
     saveStatus: "idle",
     savedAt: null,
@@ -217,6 +222,7 @@ export const useEditor = create<EditorState>((set, get) => {
         selectionSeq: id ? state.selectionSeq + 1 : state.selectionSeq,
       })),
     setViewMode: (mode) => set({ viewMode: mode, compareLayoutId: mode === "3d" ? null : get().compareLayoutId }),
+    setWorkMode: (workMode) => set({ workMode }),
     setActiveLayout: (id) => {
       const project = get().project;
       if (!project.layouts.some((layout) => layout.id === id) || project.activeLayoutId === id) return;
@@ -274,13 +280,20 @@ export const useEditor = create<EditorState>((set, get) => {
       if (project.furniture.some((item) => (item.spaces ?? []).some((entry) => entry.id === space.id))) return;
       commitProject(mapSpaces(project, furnitureId, (spaces) => [...spaces, space]), get().selectedId);
     },
-    updateStorageSpace: (furnitureId, space) => {
-      if (get().gestureBefore) get().endGesture();
+    updateStorageSpace: (furnitureId, space, mode = "commit") => {
+      const resolved = openUpdate(get, mode);
       const project = get().project;
-      commitProject(
-        mapSpaces(project, furnitureId, (spaces) => spaces.map((entry) => (entry.id === space.id ? space : entry))),
-        get().selectedId,
+      const owner = project.furniture.find((item) => item.id === furnitureId);
+      if (!owner || !(owner.spaces ?? []).some((entry) => entry.id === space.id)) return;
+      const next = mapSpaces(project, furnitureId, (spaces) =>
+        spaces.map((entry) => (entry.id === space.id ? { ...entry, ...space } : entry)),
       );
+      if (sameDocument(project, next)) return;
+      if (resolved === "preview") {
+        set({ project: next });
+        return;
+      }
+      commitProject(next, get().selectedId);
     },
     removeStorageSpace: (furnitureId, spaceId) => {
       if (get().gestureBefore) get().endGesture();
@@ -298,23 +311,41 @@ export const useEditor = create<EditorState>((set, get) => {
       if (project.storedItems.some((entry) => entry.id === item.id)) return;
       commitProject({ ...project, storedItems: [...project.storedItems, item] }, get().selectedId);
     },
-    updateStoredItem: (item) => {
-      if (get().gestureBefore) get().endGesture();
+    updateStoredItem: (item, mode = "commit") => {
+      const resolved = openUpdate(get, mode);
       const project = get().project;
-      if (!project.storedItems.some((entry) => entry.id === item.id)) return;
+      const previous = project.storedItems.find((entry) => entry.id === item.id);
+      if (!previous) return;
       if (!project.furniture.some((entry) => (entry.spaces ?? []).some((space) => space.id === item.spaceId))) return;
-      commitProject(
-        { ...project, storedItems: project.storedItems.map((entry) => (entry.id === item.id ? item : entry)) },
-        get().selectedId,
-      );
+      const merged = sanitizeStoredItem(mergeStoredItem(previous, item), project.storedItems);
+      let storedItems = project.storedItems.map((entry) => (entry.id === item.id ? merged : entry));
+      if (isContainer(previous) && !isContainer(merged)) {
+        storedItems = storedItems.map((entry) => clearContainerLink(entry, merged.id));
+      } else if (isContainer(merged) && previous.spaceId !== merged.spaceId) {
+        storedItems = storedItems.map((entry) =>
+          entry.containerId === merged.id ? { ...entry, spaceId: merged.spaceId } : entry,
+        );
+      }
+      const next: Project = { ...project, storedItems };
+      if (sameDocument(project, next)) return;
+      if (resolved === "preview") {
+        set({ project: next });
+        return;
+      }
+      commitProject(next, get().selectedId);
     },
-    removeStoredItem: (id) => {
+    removeStoredItem: (id, contents) => {
       if (get().gestureBefore) get().endGesture();
       const project = get().project;
-      commitProject(
-        { ...project, storedItems: project.storedItems.filter((item) => item.id !== id) },
-        get().selectedId,
-      );
+      const kids = project.storedItems.filter((item) => item.containerId === id);
+      if (kids.length > 0 && contents !== "release" && contents !== "discard") return;
+      let storedItems = project.storedItems.filter((item) => item.id !== id);
+      if (contents === "discard") {
+        storedItems = storedItems.filter((item) => item.containerId !== id);
+      } else {
+        storedItems = storedItems.map((entry) => clearContainerLink(entry, id));
+      }
+      commitProject({ ...project, storedItems }, get().selectedId);
     },
     setWallsVisible: (wallsVisible) => set({ wallsVisible }),
     setWallsTransparent: (wallsTransparent) => set({ wallsTransparent }),
@@ -561,6 +592,31 @@ export const useEditor = create<EditorState>((set, get) => {
   };
 });
 
+function openUpdate(get: () => EditorState, mode: UpdateMode): UpdateMode {
+  const resolved: UpdateMode = mode === "preview" && !get().gestureBefore ? "commit" : mode;
+  if (resolved === "commit" && get().gestureBefore) get().endGesture();
+  return resolved;
+}
+
+function mergeStoredItem(previous: StoredItem, next: StoredItem): StoredItem {
+  const merged: StoredItem = { ...previous, ...next };
+  if (next.width === undefined) delete merged.width;
+  if (next.depth === undefined) delete merged.depth;
+  if (next.height === undefined) delete merged.height;
+  if (next.innerWidth === undefined) delete merged.innerWidth;
+  if (next.innerDepth === undefined) delete merged.innerDepth;
+  if (next.innerHeight === undefined) delete merged.innerHeight;
+  if (next.containerId === undefined) delete merged.containerId;
+  return merged;
+}
+
+function clearContainerLink(item: StoredItem, containerId: string): StoredItem {
+  if (item.containerId !== containerId) return item;
+  const next: StoredItem = { ...item };
+  delete next.containerId;
+  return next;
+}
+
 function mapSpaces(project: Project, furnitureId: string, fn: (spaces: StorageSpace[]) => StorageSpace[]): Project {
   return {
     ...project,
@@ -725,6 +781,7 @@ export function initEditor(storage: KeyValueStorage, options?: { autosaveDelayMs
     legacyRaw: loaded.legacyRaw ?? null,
     legacyV4Raw: loaded.legacyV4Raw ?? null,
     compareLayoutId: null,
+    workMode: "layout",
     importError: null,
     saveStatus: loaded.status === "ok" ? "saved" : "idle",
     savedAt: loaded.status === "ok" ? now : null,

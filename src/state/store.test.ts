@@ -243,4 +243,122 @@ describe("editor store", () => {
     expect(useEditor.getState().project.furniture.some((item) => item.id === "bed")).toBe(false);
     expect(useEditor.getState().project.storedItems).toHaveLength(0);
   });
+
+  it("stores an optional item size on schema 5 and can clear it without dropping unknown fields", () => {
+    const { storage, map } = memory();
+    initEditor(storage);
+    useEditor.getState().addStorageSpace("bed", {
+      id: "under-bed",
+      name: "ベッド下",
+      width: cmToM(90),
+      depth: cmToM(190),
+      height: cmToM(20),
+      note: "",
+    });
+    useEditor.getState().addStoredItem({ id: "box", name: "衣装ケース", quantity: 1, spaceId: "under-bed", note: "冬" });
+    const withExtra = structuredClone(useEditor.getState().project);
+    const extra = withExtra.storedItems[0] as typeof withExtra.storedItems[0] & { boxCode?: string };
+    extra.boxCode = "A-1";
+    useEditor.setState({ project: withExtra });
+    useEditor.getState().updateStoredItem({
+      ...useEditor.getState().project.storedItems[0],
+      name: "冬服",
+      quantity: 2,
+      width: cmToM(40),
+      depth: cmToM(30),
+      height: cmToM(15),
+    });
+    const saved = JSON.parse(map.get(STORAGE_KEY) ?? "{}") as {
+      schemaVersion: number;
+      storedItems: ({ name: string; quantity: number; width?: number; boxCode?: string })[];
+    };
+    expect(saved.schemaVersion).toBe(5);
+    expect(saved.storedItems[0]).toMatchObject({ name: "冬服", quantity: 2, width: cmToM(40), boxCode: "A-1" });
+    useEditor.getState().undo();
+    expect(useEditor.getState().project.storedItems[0].name).toBe("衣装ケース");
+    expect(useEditor.getState().project.storedItems[0].width).toBeUndefined();
+
+    useEditor.getState().updateStoredItem({
+      ...useEditor.getState().project.storedItems[0],
+      width: cmToM(40),
+      depth: cmToM(30),
+      height: cmToM(15),
+    });
+    const cleared = { ...useEditor.getState().project.storedItems[0] };
+    delete cleared.width;
+    delete cleared.depth;
+    delete cleared.height;
+    useEditor.getState().updateStoredItem(cleared);
+    const after = JSON.parse(map.get(STORAGE_KEY) ?? "{}") as { storedItems: { width?: number; boxCode?: string }[] };
+    expect(after.storedItems[0].width).toBeUndefined();
+    expect(after.storedItems[0].boxCode).toBe("A-1");
+    expect(useEditor.getState().project.schemaVersion).toBe(5);
+  });
+
+  it("keeps a container and its contents on schema 5, and will not drop the contents", () => {
+    const { storage, map } = memory();
+    initEditor(storage);
+    useEditor.getState().addStorageSpace("bed", {
+      id: "under-bed",
+      name: "ベッド下",
+      width: cmToM(90),
+      depth: cmToM(190),
+      height: cmToM(20),
+      note: "",
+    });
+    useEditor.getState().addStorageSpace("desk", {
+      id: "drawer",
+      name: "引き出し",
+      width: cmToM(40),
+      depth: cmToM(30),
+      height: cmToM(10),
+      note: "",
+    });
+    useEditor.getState().addStoredItem({
+      id: "fits",
+      name: "FITS",
+      quantity: 1,
+      spaceId: "under-bed",
+      note: "",
+      width: cmToM(40),
+      depth: cmToM(30),
+      height: cmToM(15),
+      innerWidth: cmToM(35),
+      innerDepth: cmToM(25),
+      innerHeight: cmToM(12),
+    });
+    useEditor.getState().addStoredItem({
+      id: "clothes",
+      name: "冬服",
+      quantity: 1,
+      spaceId: "under-bed",
+      note: "",
+      containerId: "fits",
+      width: cmToM(30),
+      depth: cmToM(20),
+      height: cmToM(5),
+    });
+    useEditor.getState().updateFurniture("bed", { x: cmToM(110) }, "commit");
+    const saved = JSON.parse(map.get(STORAGE_KEY) ?? "{}") as {
+      schemaVersion: number;
+      storedItems: { id: string; containerId?: string; innerWidth?: number; spaceId: string }[];
+    };
+    expect(saved.schemaVersion).toBe(5);
+    expect(saved.storedItems.find((item) => item.id === "fits")?.innerWidth).toBe(cmToM(35));
+    expect(saved.storedItems.find((item) => item.id === "clothes")?.containerId).toBe("fits");
+
+    useEditor.getState().removeStoredItem("fits");
+    expect(useEditor.getState().project.storedItems.map((item) => item.id).sort()).toEqual(["clothes", "fits"]);
+
+    const fits = useEditor.getState().project.storedItems.find((item) => item.id === "fits")!;
+    useEditor.getState().updateStoredItem({ ...fits, spaceId: "drawer" });
+    const moved = useEditor.getState().project.storedItems;
+    expect(moved.find((item) => item.id === "fits")?.spaceId).toBe("drawer");
+    expect(moved.find((item) => item.id === "clothes")).toMatchObject({ spaceId: "drawer", containerId: "fits" });
+
+    useEditor.getState().removeStoredItem("fits", "release");
+    expect(useEditor.getState().project.storedItems.map((item) => item.id)).toEqual(["clothes"]);
+    expect(useEditor.getState().project.storedItems[0].containerId).toBeUndefined();
+    expect(useEditor.getState().project.storedItems[0].spaceId).toBe("drawer");
+  });
 });

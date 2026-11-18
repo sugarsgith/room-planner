@@ -16,7 +16,7 @@ test("storage spaces stay on the furniture and show on phone", async ({ page }) 
   await page.getByTestId("stored-name").fill("衣装ケース");
   await page.getByTestId("stored-qty").fill("2");
   await page.getByTestId("stored-add").click();
-  await expect(page.getByTestId("storage-index")).toContainText("衣装ケース × 2");
+  await expect(page.getByTestId("storage-index")).toContainText("衣装ケース（ベッド下） × 2");
   await page.getByTestId("storage-section").scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${outDir}/storage-pc-1440.png` });
 
