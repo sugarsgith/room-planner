@@ -54,11 +54,13 @@ test("a FITS case under the bed holds clothes, and removing the case keeps them"
   expect(clothes?.spaceId).toBe(fits?.spaceId);
 
   await page.setViewportSize({ width: 1024, height: 768 });
+  await expectFieldInside(page);
   await page.screenshot({ path: `${outDir}/storage-view-ipad-1024.png` });
   await page.getByTestId("storage-view-search").fill("");
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.getByTestId("storage-back")).toBeVisible();
   await expect(nest).toContainText("冬服");
+  await expectFieldInside(page);
   await page.screenshot({ path: `${outDir}/storage-view-iphone-390.png` });
 
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -72,6 +74,15 @@ test("a FITS case under the bed holds clothes, and removing the case keeps them"
   await expect(page.locator("[data-testid^='container-block-']")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /冬服/ })).toBeVisible();
 });
+
+async function expectFieldInside(page: Page) {
+  const place = await page.getByTestId("item-edit-place").boundingBox();
+  const name = await page.getByTestId("item-edit-name").boundingBox();
+  const editor = await page.getByTestId("storage-editor").boundingBox();
+  expect(place && name && editor).toBeTruthy();
+  expect(place!.width).toBeLessThanOrEqual(name!.width + 1);
+  expect(place!.x + place!.width).toBeLessThanOrEqual(editor!.x + editor!.width + 1);
+}
 
 async function fillSize(page: Page, widthId: string, depthId: string, heightId: string, width: string, depth: string, height: string) {
   await page.getByTestId(widthId).fill(width);

@@ -190,6 +190,7 @@ html.standalone .app {
   grid-template-columns: var(--left) minmax(0, 1fr) var(--right);
 }
 .panel {
+  min-width: 0;
   min-height: 0;
   overflow: auto;
   background: var(--panel);
@@ -235,15 +236,19 @@ html.standalone .app {
 .list-actions button { flex: 1; }
 .field, .check {
   display: grid;
-  grid-template-columns: 92px 1fr auto;
+  grid-template-columns: 92px minmax(0, 1fr) auto;
   gap: 6px;
   align-items: center;
   margin: 6px 0;
   font-size: 13px;
+  min-width: 0;
 }
-.field-wide { grid-template-columns: 92px 1fr; }
-.field input, .field-wide input[type="text"], .field input[type="color"] {
+.field-wide { grid-template-columns: 92px minmax(0, 1fr); }
+.field input, .field-wide input[type="text"], .field input[type="color"],
+.field select, .field-wide select {
   width: 100%;
+  max-width: 100%;
+  min-width: 0;
   min-height: 32px;
   border: 1px solid #d9d0c2;
   border-radius: 6px;
